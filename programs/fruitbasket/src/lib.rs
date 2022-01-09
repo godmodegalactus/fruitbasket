@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use std::{mem::size_of, str::Utf8Error};
-use anchor_spl::token::{self, Token, SetAuthority, TokenAccount};
+use anchor_spl::token::{self, Token, SetAuthority, TokenAccount, Mint, InitializeMint};
 use spl_token::instruction::{AuthorityType};
 use spl_token::instruction::{initialize_account};
 
@@ -10,9 +10,12 @@ const MAX_NB_COMPONENTS: usize = 10;
 const FRUIT_BASKET_GROUP : &[u8] = b"fruitbasket_group";
 const FRUIT_BASKET_CACHE : &[u8] = b"fruitbasket_cache";
 const FRUIT_BASKET_AUTHORITY : &[u8] = b"fruitbasket_auth";
+const FRUIT_BASKET : &[u8] = b"fruitbasket";
 
 #[program]
 pub mod fruitbasket {
+    use anchor_spl::token::accessor::authority;
+
     use super::*;
 
     pub fn initialize_group(ctx: Context<InitializeGroup>, 
@@ -31,20 +34,19 @@ pub mod fruitbasket {
         let mint_name : &[u8] = base_mint_name[..size].as_bytes();
         group.base_mint_name[..size].clone_from_slice(mint_name);
         group.number_of_baskets = 0;
+        group.nb_users = 0;
         Ok(())
     }
 
     pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
+        assert!(name.len() <=10 );
         let mut group = ctx.accounts.fruit_basket_grp.load_mut()?;
         let current : usize = group.token_count as usize;
         assert!(current < MAX_NB_TOKENS);
-        group.token_mints[current] = *ctx.accounts.mint.key;
-        group.oracles[current] = *ctx.accounts.oracle.key;
-        let size : usize = if name.len() > 10 {10} else {name.len()};
-        group.token_names[10*current..10*(10*current + size)].clone_from_slice(&name[..size].as_bytes());
-        if size < 10 {
-            group.token_names[10*current + size + 1] = 0;
-        }
+        group.token_description[current].token_mint = *ctx.accounts.mint.key;
+        group.token_description[current].price_oracle = *ctx.accounts.price_oracle.key;
+        group.token_description[current].price_oracle = *ctx.accounts.product_oracle.key;
+        group.token_description[current].token_name[..name.len()].clone_from_slice(name[..].as_bytes());
         let (authority, _bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
         {
             // change authority of token pool to authority            
@@ -56,10 +58,46 @@ pub mod fruitbasket {
             let cpi =  CpiContext::new(cpi_program, cpi_accounts);
             token::set_authority(cpi, AuthorityType::AccountOwner, Some(authority))?;
         }
-        group.token_pools[current] = *ctx.accounts.token_pool.to_account_info().key;
+        group.token_description[current].token_pool = *ctx.accounts.token_pool.to_account_info().key;
 
-        group.token_count = group.token_count + 1;
+        group.token_count += 1;
         //group.token
+        Ok(())
+    }
+
+    // add basket
+    pub fn add_basket(ctx : Context<AddBasket>, basket_number : u64, 
+        _basket_bump : u8, 
+        _basket_mint_bump : u8,
+        basket_name : String, 
+        basket_desc : String,
+        basket_components : Vec<BasketComponentDescription>) -> ProgramResult
+    {
+        assert!(basket_components.len()<10);
+        assert!(basket_components.len()>1);
+        let mut group = ctx.accounts.group.load_mut()?;
+        assert!(group.number_of_baskets == basket_number);
+        let basket = &mut ctx.accounts.basket;
+        basket.basket_name[..basket_name.len()].copy_from_slice(basket_name[..].as_bytes());
+        basket.desc[..basket_desc.len()].copy_from_slice(basket_desc[..].as_bytes());
+
+        for i in 0..basket_components.len(){
+            let component = basket_components[i];
+            basket.components[i] = component;
+        }
+        // initialize mint
+        {
+            let cpi = CpiContext::new(
+                ctx.accounts.token_program.to_account_info().clone(),
+                InitializeMint {
+                    mint: ctx.accounts.basket_mint.to_account_info().clone(),
+                    rent: ctx.accounts.rent.to_account_info(),
+                },
+            );
+            let (authority, _bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
+            token::initialize_mint(cpi, 0, &authority, Some(&authority))?;
+        }
+        group.number_of_baskets += 1;
         Ok(())
     }
 }
@@ -96,12 +134,40 @@ pub struct AddToken<'info>{
     fruit_basket_grp : AccountLoader<'info, FruitBasketGroup>,
 
     mint : AccountInfo<'info>,
-    oracle : AccountInfo<'info>,
+    price_oracle : AccountInfo<'info>,
+    product_oracle : AccountInfo<'info>,
     #[account(mut, 
               constraint = token_pool.owner == *owner.key,
               constraint = token_pool.mint == *mint.key)]
     token_pool : Account<'info, TokenAccount>,
     token_program : Program<'info, anchor_spl::token::Token>,
+}
+
+#[derive(Accounts)]
+#[instruction(basket_number : u64, basket_bump : u8, basket_mint_bump : u8)]
+pub struct AddBasket<'info> {
+    #[account(signer)]
+    client : AccountInfo<'info>,
+
+    #[account(mut)]
+    group : AccountLoader<'info, FruitBasketGroup>,
+    #[account(init,
+               seeds = [FRUIT_BASKET, group.key().as_ref(), &basket_number.to_be_bytes()],
+               bump = basket_bump,
+               payer = client,
+               space = 8 + size_of::<Basket>())]
+    basket : Account<'info, Basket>,
+
+    #[account(init,
+              seeds = [FRUIT_BASKET, b"mint".as_ref(), group.key().as_ref(), &basket_number.to_be_bytes()],
+              bump = basket_mint_bump,
+              payer = client,
+              space = Mint::LEN)]
+    basket_mint : Account<'info, Mint>,
+
+    system_program : Program<'info, System>,
+    token_program : Program<'info, anchor_spl::token::Token>,
+    rent : Sysvar<'info, Rent>,
 }
 
 /// Fruit basket group
@@ -113,19 +179,19 @@ pub struct FruitBasketGroup {
     pub token_count: u8,            // number of tokens that can be handled
     pub base_mint: Pubkey,          // usdc public key
     pub base_mint_name : [u8; 10],  // name of base / USDC
-    pub token_mints: [Pubkey; 20],  // token mints
-    pub oracles: [Pubkey;20],       // oracle keys
-    pub token_names: [u8; 20],      // token names
-    pub number_of_baskets : u32,    // number of baskets currenly created
-    pub token_pools : [Pubkey; 20], // pool for each token  
+    pub number_of_baskets : u64,    // number of baskets currenly create
+    pub nb_users: u64,              // number of users registered
+    pub token_description : [TokenDescription; 20],
 }
 
+/// state to define a basket
 #[account()]
 pub struct Basket {
-    pub basket_name: [u8; 128],
+    pub basket_name: [u8; 128],      // basket name
+    pub desc: [u8; 256],
     pub number_of_components: u8,    // basket description
-    pub components : [u8; 10], // components by index in the fruit basket group
-    pub component_size : [u64; 10],
+    pub components : [BasketComponentDescription; 10],
+    pub basket_mint : Pubkey,
 }
 
 #[account(zero_copy)]
@@ -135,9 +201,21 @@ pub struct Cache {
     pub last_confidence: [u32; 20],
 }
 
-impl<'info> FruitBasketGroup {
-    pub fn get_token_name( &self, token_index : usize) -> Result<&str, Utf8Error> {
-        assert!(token_index < MAX_NB_TOKENS);
-        std::str::from_utf8(&self.token_names[10*token_index..10*(token_index+1)])
-    }
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Copy)]
+#[repr(C)]
+pub struct TokenDescription
+{
+    pub token_mint: Pubkey,     // token mints
+    pub price_oracle: Pubkey,   // oracle keys
+    pub product_oracle: Pubkey, // product info keys
+    pub token_name: [u8; 10],      // token names
+    pub token_pool : Pubkey, // pool for each token 
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Copy)]
+#[repr(C)]
+pub struct BasketComponentDescription{
+    token_index : u8,
+    amount : u64,
+    decimal : u8,
 }

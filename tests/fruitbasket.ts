@@ -34,10 +34,22 @@ describe('fruitbasket', () => {
   const btc = test_utils.createToken(6, wallet.publicKey);
   const eth = test_utils.createToken(6, wallet.publicKey);
   const sol = test_utils.createNativeToken();
-  const alt1 = test_utils.createToken(6, wallet.publicKey);
-  const alt2 = test_utils.createToken(6, wallet.publicKey);
+  const srm = test_utils.createToken(6, wallet.publicKey);
+  const mngo = test_utils.createToken(6, wallet.publicKey);
+  const shit1 = test_utils.createToken(6, wallet.publicKey);
+  const shit2 = test_utils.createToken(6, wallet.publicKey);
 
-  const mint_authority = web3.Keypair.generate();
+  let tokens = [usdc, btc, eth, sol, srm, mngo, shit1, shit2];
+  let token_names = ["USDC", "BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
+
+  let price_oracles = [];
+  let produce_oracles = [];
+
+  for( let i = 0; i < 8; ++i)
+  {
+    price_oracles.push(web3.Keypair.generate());
+    produce_oracles.push(web3.Keypair.generate());
+  }
 
   let frt_bsk_group = null;
   let frt_bsk_cache = null;
@@ -58,7 +70,7 @@ describe('fruitbasket', () => {
       bump_grp,
       bump_cache,
       (await usdc).publicKey,
-      "usdc",
+      "USDC",
       {
         accounts:{
           owner: owner.publicKey,
@@ -70,4 +82,69 @@ describe('fruitbasket', () => {
       }
     );
   });
+
+  it( "Tokens added ", async() => {
+    
+    let token_pools = await Promise.all(tokens.map( async(x) => await (await x).createAccount(owner.publicKey)));
+
+    for(let index = 0; index < 8; ++index){
+      await program.rpc.addToken(
+        token_names[index],
+        {
+          accounts : {
+            owner: owner.publicKey,
+            fruitBasketGrp: frt_bsk_group,
+            mint : (await tokens[index]).publicKey,
+            priceOracle : price_oracles[index].publicKey,
+            productOracle : produce_oracles[index].publicKey,
+            tokenPool: token_pools[index],
+            tokenProgram : TOKEN_PROGRAM_ID,
+          },
+          signers : [owner],
+        }
+      );
+       ++index;
+    };
+  } );
+
+  it( "Baskets created ", async() => {
+    const basket_nb = new anchor.BN(1);
+    const [basket_1, bump_b1] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), frt_bsk_group.toBuffer(), basket_nb.toBuffer()], program.programId);
+    const [basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from('mint'), frt_bsk_group.toBuffer(), basket_nb.toBuffer()], program.programId);
+    let c1 = new ComponentInfo();
+    c1.tokenIndex = 2;
+    c1.amount = 0.01;
+    c1.decimal = 6;
+    let c2 = new ComponentInfo();
+    c1.tokenIndex = 3;
+    c1.amount = 0.1;
+    c1.decimal = 6;
+    const components_1 = [c1, c2];
+    await program.rpc.addBasket(
+      basket_nb,
+      bump_b1,
+      bump_b1m,
+      "First tier coins",
+      "Basket for first teer coins",
+      components_1,
+      {
+        accounts : {
+          client : owner.publicKey,
+          group : frt_bsk_group,
+          basket : basket_1,
+          basketMint : basket_1_mint,
+          systemProgram : web3.SystemProgram.programId,
+          tokenProgram : TOKEN_PROGRAM_ID,
+          rent : web3.SYSVAR_RENT_PUBKEY,
+        },
+        signers: [owner]
+      }
+    );
+  } );
+
+  function ComponentInfo() {
+    this.tokenIndex;
+    this.amount;
+    this.decimal;
+  }
 });
