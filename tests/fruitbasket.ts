@@ -30,6 +30,7 @@ describe('fruitbasket', () => {
   const owner = web3.Keypair.generate();
 
   // create some tokens
+  const nb_tokens = 8;
   const usdc = test_utils.createToken(6, wallet.publicKey);
   const btc = test_utils.createToken(6, wallet.publicKey);
   const eth = test_utils.createToken(6, wallet.publicKey);
@@ -45,7 +46,7 @@ describe('fruitbasket', () => {
   let price_oracles = [];
   let produce_oracles = [];
 
-  for( let i = 0; i < 8; ++i)
+  for( let i = 0; i < nb_tokens; ++i)
   {
     price_oracles.push(web3.Keypair.generate());
     produce_oracles.push(web3.Keypair.generate());
@@ -87,7 +88,7 @@ describe('fruitbasket', () => {
     
     let token_pools = await Promise.all(tokens.map( async(x) => await (await x).createAccount(owner.publicKey)));
 
-    for(let index = 0; index < 8; ++index){
+    for(let index = 0; index < nb_tokens; ++index){
       await program.rpc.addToken(
         token_names[index],
         {
@@ -108,22 +109,47 @@ describe('fruitbasket', () => {
   } );
 
   it( "Baskets created ", async() => {
-    const basket_nb = 0;
+    const exp = 1000000;
+    let comp_btc = new ComponentInfo();
+    comp_btc.tokenIndex = 1;
+    comp_btc.amount = new anchor.BN(exp * 0.01); // 0.01 BTC
+    comp_btc.decimal = 6;
+
+    let comp_eth = new ComponentInfo();
+    comp_eth.tokenIndex = 2;
+    comp_eth.amount = new anchor.BN(exp * 0.1); // 0.1 ETC
+    comp_eth.decimal = 6;
+
+    let comp_sol = new ComponentInfo();
+    comp_sol.tokenIndex = 3;
+    comp_sol.amount = new anchor.BN(2 * web3.LAMPORTS_PER_SOL); // 2 SOL
+    comp_sol.decimal = 9;
+
+    let comp_srm = new ComponentInfo();
+    comp_srm.tokenIndex = 4;
+    comp_srm.amount = new anchor.BN(exp * 100); // 100 SRM
+    comp_srm.decimal = 6;
+
+    let comp_mngo = new ComponentInfo();
+    comp_srm.tokenIndex = 5;
+    comp_srm.amount = new anchor.BN(exp * 1000); // 1000 MNGO
+    comp_srm.decimal = 6;
+
+    let comp_sh1 = new ComponentInfo();
+    comp_srm.tokenIndex = 6;
+    comp_srm.amount = new anchor.BN(exp * 10000); // 10000 SHIT1
+    comp_srm.decimal = 6;
+
+    let comp_sh2 = new ComponentInfo();
+    comp_srm.tokenIndex = 7;
+    comp_srm.amount = new anchor.BN(exp * 100000); // 100000 SHIT1
+    comp_srm.decimal = 6;
+
+    // first basket
+    let basket_nb = 0;
     const [basket_1, bump_b1] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
     const [basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
-    let c1 = new ComponentInfo();
-    c1.tokenIndex = 2;
-    c1.amount = new anchor.BN(10000);
-    c1.decimal = 6;
-    let c2 = new ComponentInfo();
-    c1.tokenIndex = 3;
-    c1.amount = new anchor.BN(100000);
-    c1.decimal = 6;
-    const components_1 = [c1, c2];
-    mlog.log("clinet : " + owner.publicKey);
-    mlog.log("group : " + frt_bsk_group);
-    mlog.log("basket : " + basket_1);
-    mlog.log("basket_1_mint : " + basket_1_mint);
+    const components_1 = [comp_btc, comp_eth, comp_sol];
     
     await program.rpc.addBasket(
       basket_nb,
@@ -138,6 +164,58 @@ describe('fruitbasket', () => {
           group : frt_bsk_group,
           basket : basket_1,
           basketMint : basket_1_mint,
+          systemProgram : web3.SystemProgram.programId,
+          tokenProgram : TOKEN_PROGRAM_ID,
+          rent : web3.SYSVAR_RENT_PUBKEY,
+        },
+        signers: [owner]
+      }
+    );
+
+    // second basket
+    ++basket_nb;
+    const [basket_2, bump_b2] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
+    const [basket_2_mint, bump_b2m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
+    const components_2 = [comp_sol, comp_srm, comp_mngo];
+    await program.rpc.addBasket(
+      basket_nb,
+      bump_b2,
+      bump_b2m,
+      "Solana coins",
+      "Basket for coins base on solana",
+      components_2,
+      {
+        accounts : {
+          client : owner.publicKey,
+          group : frt_bsk_group,
+          basket : basket_2,
+          basketMint : basket_2_mint,
+          systemProgram : web3.SystemProgram.programId,
+          tokenProgram : TOKEN_PROGRAM_ID,
+          rent : web3.SYSVAR_RENT_PUBKEY,
+        },
+        signers: [owner]
+      }
+    );
+
+    // third basket
+    ++basket_nb;
+    const [basket_3, bump_b3] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
+    const [basket_3_mint, bump_b3m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
+    const components_3 = [comp_sh1, comp_sh2];
+    await program.rpc.addBasket(
+      basket_nb,
+      bump_b3,
+      bump_b3m,
+      "Shit coins",
+      "Basket for shit coins that have potential in future",
+      components_3,
+      {
+        accounts : {
+          client : owner.publicKey,
+          group : frt_bsk_group,
+          basket : basket_3,
+          basketMint : basket_3_mint,
           systemProgram : web3.SystemProgram.programId,
           tokenProgram : TOKEN_PROGRAM_ID,
           rent : web3.SYSVAR_RENT_PUBKEY,
