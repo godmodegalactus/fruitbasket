@@ -2,10 +2,13 @@ use anchor_lang::prelude::*;
 use std::{mem::size_of};
 use anchor_spl::token::{self, SetAuthority, TokenAccount, Mint, InitializeMint};
 use spl_token::instruction::{AuthorityType};
+use pyth_client::Price;
+
 mod instructions;
 use instructions::*;
 mod states;
 use states::*;
+
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 const MAX_NB_TOKENS : usize = 20;
@@ -106,6 +109,33 @@ pub mod fruitbasket {
             token::initialize_mint(cpi, 6, &authority, Some(&authority))?;
         }
         group.number_of_baskets += 1;
+        Ok(())
+    }
+
+    pub fn update_price(ctx : Context<UpdatePrice>) -> ProgramResult 
+    {
+
+        let group = ctx.accounts.group.load()?;
+        let cache = &mut ctx.accounts.cache.load_mut()?;
+        let pos = group.token_description.iter().position(|x| x.price_oracle == *ctx.accounts.oracle_ai.key);
+        // check if oracle is registered in token list
+        assert_ne!(pos, None);
+        let token_index = pos.unwrap();
+        let oracle_data = ctx.accounts.oracle_ai.try_borrow_data()?;
+        let oracle = pyth_client::cast::<Price>(&oracle_data);
+        assert!( oracle.agg.price < 0 );
+        let threshold = oracle.agg.price.checked_div(10).unwrap(); // confidence should be within 10%
+        assert!(oracle.agg.conf < threshold as u64);
+        cache.last_price[token_index] = oracle.agg.price as u64;
+        cache.last_confidence[token_index] = oracle.agg.conf;
+        cache.last_exp[token_index] = oracle.expo as u8;
+        Ok(())
+    }
+
+    pub fn update_basket_price(ctx : Context<UpdateBasketPrice>) -> ProgramResult{
+        let basket = &mut ctx.accounts.basket;
+        let cache = ctx.accounts.cache.load()?;
+        basket.update_price(&cache);
         Ok(())
     }
 }

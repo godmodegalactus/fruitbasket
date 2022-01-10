@@ -68,3 +68,19 @@ pub struct AddBasket<'info> {
     pub token_program : Program<'info, anchor_spl::token::Token>,
     pub rent : Sysvar<'info, Rent>,
 }
+
+#[derive(Accounts)]
+pub struct UpdatePrice<'info> {
+    pub group : AccountLoader<'info, FruitBasketGroup>,
+    #[account(mut)]
+    pub cache : AccountLoader<'info, Cache>,
+    pub oracle_ai : AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateBasketPrice<'info> {
+    #[account(mut)]
+    pub basket : Account<'info, Basket>,
+
+    pub cache : AccountLoader<'info, Cache>,
+}
