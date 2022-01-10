@@ -10,6 +10,7 @@ import {
 } from '@solana/spl-token';
 
 import * as testutils from './utils/testutils';
+import * as pyth from './utils/pyth'
 import { token } from '@project-serum/anchor/dist/cjs/utils';
 import mlog from 'mocha-logger';
 
@@ -29,6 +30,8 @@ describe('fruitbasket', () => {
 
   const owner = web3.Keypair.generate();
 
+  const oracle = new pyth.Pyth(provider.connection, provider.wallet);
+
   // create some tokens
   const nb_tokens = 8;
   const usdc = test_utils.createToken(6, wallet.publicKey);
@@ -45,12 +48,19 @@ describe('fruitbasket', () => {
 
   let price_oracles = [];
   let produce_oracles = [];
-
-  for( let i = 0; i < nb_tokens; ++i)
-  {
-    price_oracles.push(web3.Keypair.generate());
-    produce_oracles.push(web3.Keypair.generate());
-  }
+  it('Oracles initialized', async () => {
+    
+    let oracle_promises = [];
+    for( let i = 0; i < nb_tokens; ++i)
+    {
+      oracle_promises.push([oracle.createPriceAccount(), oracle.createProductAccount()]);
+    }
+    for(let i = 0; i< nb_tokens; ++i)
+    {
+      price_oracles.push(await oracle_promises[i][0]);
+      produce_oracles.push(await oracle_promises[i][1]);      
+    }
+  });
 
   let frt_bsk_group = null;
   let frt_bsk_cache = null;
