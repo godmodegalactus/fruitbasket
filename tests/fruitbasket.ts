@@ -108,18 +108,23 @@ describe('fruitbasket', () => {
   } );
 
   it( "Baskets created ", async() => {
-    const basket_nb = new anchor.BN(1);
-    const [basket_1, bump_b1] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), frt_bsk_group.toBuffer(), basket_nb.toBuffer()], program.programId);
-    const [basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from('mint'), frt_bsk_group.toBuffer(), basket_nb.toBuffer()], program.programId);
+    const basket_nb = 0;
+    const [basket_1, bump_b1] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
+    const [basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
     let c1 = new ComponentInfo();
     c1.tokenIndex = 2;
-    c1.amount = 0.01;
+    c1.amount = new anchor.BN(10000);
     c1.decimal = 6;
     let c2 = new ComponentInfo();
     c1.tokenIndex = 3;
-    c1.amount = 0.1;
+    c1.amount = new anchor.BN(100000);
     c1.decimal = 6;
     const components_1 = [c1, c2];
+    mlog.log("clinet : " + owner.publicKey);
+    mlog.log("group : " + frt_bsk_group);
+    mlog.log("basket : " + basket_1);
+    mlog.log("basket_1_mint : " + basket_1_mint);
+    
     await program.rpc.addBasket(
       basket_nb,
       bump_b1,

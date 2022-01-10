@@ -11,6 +11,7 @@ const FRUIT_BASKET_GROUP : &[u8] = b"fruitbasket_group";
 const FRUIT_BASKET_CACHE : &[u8] = b"fruitbasket_cache";
 const FRUIT_BASKET_AUTHORITY : &[u8] = b"fruitbasket_auth";
 const FRUIT_BASKET : &[u8] = b"fruitbasket";
+const FRUIT_BASKET_MINT : &[u8] = b"fruitbasket_mint";
 
 #[program]
 pub mod fruitbasket {
@@ -35,6 +36,10 @@ pub mod fruitbasket {
         group.base_mint_name[..size].clone_from_slice(mint_name);
         group.number_of_baskets = 0;
         group.nb_users = 0;
+        
+        //pre allocate programming addresses
+        Pubkey::find_program_address(&[FRUIT_BASKET.as_ref(), &[0]], ctx.program_id);
+        Pubkey::find_program_address(&[FRUIT_BASKET_MINT.as_ref(), &[0]], ctx.program_id);
         Ok(())
     }
 
@@ -66,7 +71,8 @@ pub mod fruitbasket {
     }
 
     // add basket
-    pub fn add_basket(ctx : Context<AddBasket>, basket_number : u64, 
+    pub fn add_basket(ctx : Context<AddBasket>, 
+        basket_number : u8, 
         _basket_bump : u8, 
         _basket_mint_bump : u8,
         basket_name : String, 
@@ -85,6 +91,8 @@ pub mod fruitbasket {
             let component = basket_components[i];
             basket.components[i] = component;
         }
+        
+        let (authority, _bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
         // initialize mint
         {
             let cpi = CpiContext::new(
@@ -94,8 +102,7 @@ pub mod fruitbasket {
                     rent: ctx.accounts.rent.to_account_info(),
                 },
             );
-            let (authority, _bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
-            token::initialize_mint(cpi, 0, &authority, Some(&authority))?;
+            token::initialize_mint(cpi, 6, &authority, Some(&authority))?;
         }
         group.number_of_baskets += 1;
         Ok(())
@@ -144,26 +151,27 @@ pub struct AddToken<'info>{
 }
 
 #[derive(Accounts)]
-#[instruction(basket_number : u64, basket_bump : u8, basket_mint_bump : u8)]
+#[instruction(basket_number : u8, basket_bump : u8, basket_mint_bump : u8)]
 pub struct AddBasket<'info> {
-    #[account(signer)]
+    #[account(mut, signer)]
     client : AccountInfo<'info>,
 
     #[account(mut)]
     group : AccountLoader<'info, FruitBasketGroup>,
     #[account(init,
-               seeds = [FRUIT_BASKET, group.key().as_ref(), &basket_number.to_be_bytes()],
+               seeds = [FRUIT_BASKET, &[basket_number]],
                bump = basket_bump,
                payer = client,
                space = 8 + size_of::<Basket>())]
-    basket : Account<'info, Basket>,
+    basket : Box<Account<'info, Basket>>,
 
     #[account(init,
-              seeds = [FRUIT_BASKET, b"mint".as_ref(), group.key().as_ref(), &basket_number.to_be_bytes()],
+              seeds = [FRUIT_BASKET_MINT, &[basket_number]],
               bump = basket_mint_bump,
               payer = client,
+              owner = token::ID,
               space = Mint::LEN)]
-    basket_mint : Account<'info, Mint>,
+    basket_mint : AccountInfo<'info>,
 
     system_program : Program<'info, System>,
     token_program : Program<'info, anchor_spl::token::Token>,
@@ -179,8 +187,8 @@ pub struct FruitBasketGroup {
     pub token_count: u8,            // number of tokens that can be handled
     pub base_mint: Pubkey,          // usdc public key
     pub base_mint_name : [u8; 10],  // name of base / USDC
-    pub number_of_baskets : u64,    // number of baskets currenly create
-    pub nb_users: u64,              // number of users registered
+    pub number_of_baskets : u8,    // number of baskets currenly create
+    pub nb_users: u8,              // number of users registered
     pub token_description : [TokenDescription; 20],
 }
 
