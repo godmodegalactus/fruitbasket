@@ -9,6 +9,22 @@
   dependencies:
     "regenerator-runtime" "^0.13.4"
 
+"@blockworks-foundation/mango-client@^3.2.25":
+  "integrity" "sha512-+iFMHcvoI+mCpwkABIUp2adOoa7EoIe7jBYpxtCT7q7mHRnuC2IyAqHfFT2FKeXvZyb93ljc4ZgAOWioPNGHPA=="
+  "resolved" "https://registry.npmjs.org/@blockworks-foundation/mango-client/-/mango-client-3.2.25.tgz"
+  "version" "3.2.25"
+  dependencies:
+    "@project-serum/anchor" "^0.16.2"
+    "@project-serum/serum" "0.13.55"
+    "@project-serum/sol-wallet-adapter" "^0.2.0"
+    "@solana/spl-token" "^0.1.6"
+    "@solana/web3.js" "^1.31.0"
+    "big.js" "^6.1.1"
+    "bn.js" "^5.2.0"
+    "buffer-layout" "^1.2.1"
+    "dotenv" "^10.0.0"
+    "yargs" "^17.0.1"
+
 "@ethersproject/bytes@^5.5.0":
   "integrity" "sha512-ABvc7BHWhZU9PNM/tANm/Qx4ostPGadAuQzWTr3doklZOhDlmcBqclrQe/ZXUIj3K8wC28oYeuRa+A37tX9kog=="
   "resolved" "https://registry.npmjs.org/@ethersproject/bytes/-/bytes-5.5.0.tgz"
@@ -29,6 +45,46 @@
     "@ethersproject/bytes" "^5.5.0"
     "@ethersproject/logger" "^5.5.0"
     "hash.js" "1.1.7"
+
+"@project-serum/anchor@^0.11.1":
+  "integrity" "sha512-oIdm4vTJkUy6GmE6JgqDAuQPKI7XM4TPJkjtoIzp69RZe0iAD9JP2XHx7lV1jLdYXeYHqDXfBt3zcq7W91K6PA=="
+  "resolved" "https://registry.npmjs.org/@project-serum/anchor/-/anchor-0.11.1.tgz"
+  "version" "0.11.1"
+  dependencies:
+    "@project-serum/borsh" "^0.2.2"
+    "@solana/web3.js" "^1.17.0"
+    "base64-js" "^1.5.1"
+    "bn.js" "^5.1.2"
+    "bs58" "^4.0.1"
+    "buffer-layout" "^1.2.0"
+    "camelcase" "^5.3.1"
+    "crypto-hash" "^1.3.0"
+    "eventemitter3" "^4.0.7"
+    "find" "^0.3.0"
+    "js-sha256" "^0.9.0"
+    "pako" "^2.0.3"
+    "snake-case" "^3.0.4"
+    "toml" "^3.0.0"
+
+"@project-serum/anchor@^0.16.2":
+  "integrity" "sha512-wOJwObd4wOZ5tRRMCKYjeMNsEmf7vuC71KQRnw6wthhErL8c/818n4gYIZCf/1ZPl/8WPruIlmtQHDSEyy2+0Q=="
+  "resolved" "https://registry.npmjs.org/@project-serum/anchor/-/anchor-0.16.2.tgz"
+  "version" "0.16.2"
+  dependencies:
+    "@project-serum/borsh" "^0.2.2"
+    "@solana/web3.js" "^1.17.0"
+    "base64-js" "^1.5.1"
+    "bn.js" "^5.1.2"
+    "bs58" "^4.0.1"
+    "buffer-layout" "^1.2.0"
+    "camelcase" "^5.3.1"
+    "crypto-hash" "^1.3.0"
+    "eventemitter3" "^4.0.7"
+    "find" "^0.3.0"
+    "js-sha256" "^0.9.0"
+    "pako" "^2.0.3"
+    "snake-case" "^3.0.4"
+    "toml" "^3.0.0"
 
 "@project-serum/anchor@^0.19.0":
   "integrity" "sha512-cs0LBmJOrL9eJ8MRNqitnzbpCT5QEzVdJmiIjfNV5YaGn1K9vISR7DtISj3Bdl3KBdLqii4CTw1mpHdi8iXUCg=="
@@ -58,6 +114,25 @@
     "bn.js" "^5.1.2"
     "buffer-layout" "^1.2.0"
 
+"@project-serum/serum@0.13.55":
+  "integrity" "sha512-SPQ4NsuNbBJO3mLGnTYbjt47WCXoNIcW2C9xv0gNXyG62dxgONsAEEgErKv1gT34hWCMPsXFSpatnX6ppriq7w=="
+  "resolved" "https://registry.npmjs.org/@project-serum/serum/-/serum-0.13.55.tgz"
+  "version" "0.13.55"
+  dependencies:
+    "@project-serum/anchor" "^0.11.1"
+    "@solana/spl-token" "^0.1.6"
+    "@solana/web3.js" "^1.21.0"
+    "bn.js" "^5.1.2"
+    "buffer-layout" "^1.2.0"
+
+"@project-serum/sol-wallet-adapter@^0.2.0":
+  "integrity" "sha512-cpIb13aWPW8y4KzkZAPDgw+Kb+DXjCC6rZoH74MGm3I/6e/zKyGnfAuW5olb2zxonFqsYgnv7ev8MQnvSgJ3/g=="
+  "resolved" "https://registry.npmjs.org/@project-serum/sol-wallet-adapter/-/sol-wallet-adapter-0.2.6.tgz"
+  "version" "0.2.6"
+  dependencies:
+    "bs58" "^4.0.1"
+    "eventemitter3" "^4.0.7"
+
 "@pythnetwork/client@^2.5.1":
   "integrity" "sha512-QXt31aWuVi02yvjmNEFDKurTkeTL/BEM4Ney4uixUbkxZDSrYRUuYNXPTrylRLdT3C3DlbF858/Jt7DwtLMR2w=="
   "resolved" "https://registry.npmjs.org/@pythnetwork/client/-/client-2.5.1.tgz"
@@ -74,7 +149,7 @@
   dependencies:
     "buffer" "~6.0.3"
 
-"@solana/spl-token@^0.1.8":
+"@solana/spl-token@^0.1.6", "@solana/spl-token@^0.1.8":
   "integrity" "sha512-LZmYCKcPQDtJgecvWOgT/cnoIQPWjdH+QVyzPcFvyDUiT0DiRjZaam4aqNUyvchLFhzgunv3d9xOoyE34ofdoQ=="
   "resolved" "https://registry.npmjs.org/@solana/spl-token/-/spl-token-0.1.8.tgz"
   "version" "0.1.8"
@@ -86,7 +161,7 @@
     "buffer-layout" "^1.2.0"
     "dotenv" "10.0.0"
 
-"@solana/web3.js@^1.17.0", "@solana/web3.js@^1.2.0", "@solana/web3.js@^1.21.0", "@solana/web3.js@^1.30.2":
+"@solana/web3.js@^1.17.0", "@solana/web3.js@^1.2.0", "@solana/web3.js@^1.21.0", "@solana/web3.js@^1.30.2", "@solana/web3.js@^1.31.0", "@solana/web3.js@^1.5.0":
   "integrity" "sha512-7nHHx1JNFnrt15e9y8m38I/EJCbaB+bFC3KZVM1+QhybCikFxGMtGA5r7PDC3GEL1R2RZA8yKoLkDKo3vzzqnw=="
   "resolved" "https://registry.npmjs.org/@solana/web3.js/-/web3.js-1.31.0.tgz"
   "version" "1.31.0"
@@ -253,6 +328,11 @@
   "resolved" "https://registry.npmjs.org/base64-js/-/base64-js-1.5.1.tgz"
   "version" "1.5.1"
 
+"big.js@^6.1.1":
+  "integrity" "sha512-1vObw81a8ylZO5ePrtMay0n018TcftpTA5HFKDaSuiUDBo8biRBtjIobw60OpwuvrGk+FsxKamqN4cnmj/eXdg=="
+  "resolved" "https://registry.npmjs.org/big.js/-/big.js-6.1.1.tgz"
+  "version" "6.1.1"
+
 "binary-extensions@^2.0.0":
   "integrity" "sha512-jDctJ/IVQbZoJykoeHbhXpOlNBqGNcwXJKJog42E5HDPUwQTSdjCHdihjj0DlnheQ7blbT6dHOafNAiS8ooQKA=="
   "resolved" "https://registry.npmjs.org/binary-extensions/-/binary-extensions-2.2.0.tgz"
@@ -263,7 +343,7 @@
   "resolved" "https://registry.npmjs.org/bn.js/-/bn.js-4.12.0.tgz"
   "version" "4.12.0"
 
-"bn.js@^5.0.0", "bn.js@^5.1.0", "bn.js@^5.1.2":
+"bn.js@^5.0.0", "bn.js@^5.1.0", "bn.js@^5.1.2", "bn.js@^5.2.0":
   "integrity" "sha512-D7iWRBvnZE8ecXiLj/9wbxH7Tk79fAh8IHaTNq1RWRixsS02W+5qS+iE9yq6RYl0asXx5tw0bLhmT5pIfbSquw=="
   "resolved" "https://registry.npmjs.org/bn.js/-/bn.js-5.2.0.tgz"
   "version" "5.2.0"
@@ -315,7 +395,7 @@
   "resolved" "https://registry.npmjs.org/buffer-from/-/buffer-from-1.1.2.tgz"
   "version" "1.1.2"
 
-"buffer-layout@^1.2.0", "buffer-layout@^1.2.2":
+"buffer-layout@^1.2.0", "buffer-layout@^1.2.1", "buffer-layout@^1.2.2":
   "integrity" "sha512-kWSuLN694+KTk8SrYvCqwP2WcgQjoRCiF5b4QDvkkz8EmgD+aWAIceGFKMIAdmF/pH+vpgNV3d3kAKorcdAmWA=="
   "resolved" "https://registry.npmjs.org/buffer-layout/-/buffer-layout-1.2.2.tgz"
   "version" "1.2.2"
@@ -528,7 +608,7 @@
     "no-case" "^3.0.4"
     "tslib" "^2.0.3"
 
-"dotenv@10.0.0":
+"dotenv@^10.0.0", "dotenv@10.0.0":
   "integrity" "sha512-rlBi9d8jpv9Sf1klPjNfFAuWDjKLwTIJJ/VxtoTwIR6hnZxcEOQCZg2oIL3MWBYw5GpUDKOEnND7LXTbIpQ03Q=="
   "resolved" "https://registry.npmjs.org/dotenv/-/dotenv-10.0.0.tgz"
   "version" "10.0.0"
@@ -1406,7 +1486,7 @@
     "is-fullwidth-code-point" "^2.0.0"
     "strip-ansi" "^4.0.0"
 
-"string-width@^4.1.0", "string-width@^4.2.0":
+"string-width@^4.1.0", "string-width@^4.2.0", "string-width@^4.2.3":
   "integrity" "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g=="
   "resolved" "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"
   "version" "4.2.3"
@@ -1664,6 +1744,11 @@
   "resolved" "https://registry.npmjs.org/yargs-parser/-/yargs-parser-20.2.9.tgz"
   "version" "20.2.9"
 
+"yargs-parser@^21.0.0":
+  "integrity" "sha512-z9kApYUOCwoeZ78rfRYYWdiU/iNL6mwwYlkkZfJoyMR1xps+NEBX5X7XmRpxkZHhXJ6+Ey00IwKxBBSW9FIjyA=="
+  "resolved" "https://registry.npmjs.org/yargs-parser/-/yargs-parser-21.0.0.tgz"
+  "version" "21.0.0"
+
 "yargs-parser@20.2.4":
   "integrity" "sha512-WOkpgNhPTlE73h4VFAFsOnomJVaovO8VqLDzy5saChRBFQFBoMYirowyW+Q9HB4HFF4Z7VZTiG3iSzJJA29yRA=="
   "resolved" "https://registry.npmjs.org/yargs-parser/-/yargs-parser-20.2.4.tgz"
@@ -1678,6 +1763,19 @@
     "decamelize" "^4.0.0"
     "flat" "^5.0.2"
     "is-plain-obj" "^2.1.0"
+
+"yargs@^17.0.1":
+  "integrity" "sha512-WUANQeVgjLbNsEmGk20f+nlHgOqzRFpiGWVaBrYGYIGANIIu3lWjoyi0fNlFmJkvfhCZ6BXINe7/W2O2bV4iaA=="
+  "resolved" "https://registry.npmjs.org/yargs/-/yargs-17.3.1.tgz"
+  "version" "17.3.1"
+  dependencies:
+    "cliui" "^7.0.2"
+    "escalade" "^3.1.1"
+    "get-caller-file" "^2.0.5"
+    "require-directory" "^2.1.1"
+    "string-width" "^4.2.3"
+    "y18n" "^5.0.5"
+    "yargs-parser" "^21.0.0"
 
 "yargs@16.2.0":
   "integrity" "sha512-D1mvvtDG0L5ft/jGWkLpG1+m0eQxOfaBvTNELraWj22wSVUMWxZUvYgJYcKh6jGGIkJFhH4IZPQhR4TKpc8mBw=="

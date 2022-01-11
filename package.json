@@ -4,6 +4,7 @@
     "description": "",
     "author": "godmodegalactus",
     "dependencies": {
+        "@blockworks-foundation/mango-client": "^3.2.25",
         "@project-serum/anchor": "^0.19.0",
         "@pythnetwork/client": "^2.5.1",
         "@solana/spl-token": "^0.1.8",

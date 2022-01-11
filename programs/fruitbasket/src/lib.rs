@@ -54,7 +54,7 @@ pub mod fruitbasket {
         assert!(current < MAX_NB_TOKENS);
         group.token_description[current].token_mint = *ctx.accounts.mint.key;
         group.token_description[current].price_oracle = *ctx.accounts.price_oracle.key;
-        group.token_description[current].price_oracle = *ctx.accounts.product_oracle.key;
+        group.token_description[current].product_oracle = *ctx.accounts.product_oracle.key;
         group.token_description[current].token_name[..name.len()].clone_from_slice(name[..].as_bytes());
         let (authority, _bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
         {
@@ -87,9 +87,12 @@ pub mod fruitbasket {
         assert!(basket_components.len()>1);
         let mut group = ctx.accounts.group.load_mut()?;
         assert!(group.number_of_baskets == basket_number);
+
         let basket = &mut ctx.accounts.basket;
         basket.basket_name[..basket_name.len()].copy_from_slice(basket_name[..].as_bytes());
         basket.desc[..basket_desc.len()].copy_from_slice(basket_desc[..].as_bytes());
+        basket.number_of_components = basket_components.len() as u8;
+        basket.basket_mint = *ctx.accounts.basket_mint.to_account_info().key;
 
         for i in 0..basket_components.len(){
             let component = basket_components[i];
@@ -117,25 +120,26 @@ pub mod fruitbasket {
 
         let group = ctx.accounts.group.load()?;
         let cache = &mut ctx.accounts.cache.load_mut()?;
-        let pos = group.token_description.iter().position(|x| x.price_oracle == *ctx.accounts.oracle_ai.key);
+
+        let pos = group.token_description.iter().position(|x| x.price_oracle == *ctx.accounts.oracle_ai.key );
         // check if oracle is registered in token list
         assert_ne!(pos, None);
         let token_index = pos.unwrap();
         let oracle_data = ctx.accounts.oracle_ai.try_borrow_data()?;
         let oracle = pyth_client::cast::<Price>(&oracle_data);
-        assert!( oracle.agg.price < 0 );
+        assert!( oracle.agg.price > 0 );
         let threshold = oracle.agg.price.checked_div(10).unwrap(); // confidence should be within 10%
         assert!(oracle.agg.conf < threshold as u64);
         cache.last_price[token_index] = oracle.agg.price as u64;
         cache.last_confidence[token_index] = oracle.agg.conf;
-        cache.last_exp[token_index] = oracle.expo as u8;
+        cache.last_exp[token_index] = oracle.expo;
         Ok(())
     }
 
     pub fn update_basket_price(ctx : Context<UpdateBasketPrice>) -> ProgramResult{
         let basket = &mut ctx.accounts.basket;
         let cache = ctx.accounts.cache.load()?;
-        basket.update_price(&cache);
+        basket.update_price(&cache)?;
         Ok(())
     }
 }

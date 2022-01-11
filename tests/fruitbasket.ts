@@ -7,12 +7,14 @@ import {
   TOKEN_PROGRAM_ID,
   AccountLayout as TokenAccountLayout,
   u64,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 
 import * as testutils from './utils/testutils';
 import * as pyth from './utils/pyth'
 import { token } from '@project-serum/anchor/dist/cjs/utils';
 import mlog from 'mocha-logger';
+import { assert } from "chai";
 
 type Connection = web3.Connection;
 
@@ -27,6 +29,8 @@ describe('fruitbasket', () => {
   const test_utils = new testutils.TestUtils(connection, provider.wallet);
 
   const program = anchor.workspace.Fruitbasket as Program<Fruitbasket>;
+  type FruitBasketGroup = anchor.IdlAccounts<Fruitbasket>["fruitBasketGroup"];
+  type Basket = anchor.IdlAccounts<Fruitbasket>["basket"];
 
   const owner = web3.Keypair.generate();
 
@@ -45,20 +49,30 @@ describe('fruitbasket', () => {
 
   let tokens = [usdc, btc, eth, sol, srm, mngo, shit1, shit2];
   let token_names = ["USDC", "BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
+  let token_prices = [1000n, 40000000n, 4000000n, 200000000n, 4000000n, 140n, 1450n, 5000n];
+  let token_exp = [-3, -3, -3, -6, -6, -3, -4, -6];
 
-  let price_oracles = [];
+  let price_oracles = [] ;
   let produce_oracles = [];
   it('Oracles initialized', async () => {
-    
-    let oracle_promises = [];
-    for( let i = 0; i < nb_tokens; ++i)
-    {
-      oracle_promises.push([oracle.createPriceAccount(), oracle.createProductAccount()]);
-    }
     for(let i = 0; i< nb_tokens; ++i)
     {
-      price_oracles.push(await oracle_promises[i][0]);
-      produce_oracles.push(await oracle_promises[i][1]);      
+      price_oracles.push(oracle.createPriceAccount());
+      produce_oracles.push(oracle.createProductAccount());      
+    }
+    let oracle_promises = [];
+    for(let i =0; i< nb_tokens; ++i){
+      oracle_promises.push( oracle.updatePriceAccount( await price_oracles[i], {
+        exponent: token_exp[i],
+        aggregatePriceInfo: {
+          price: token_prices[i] ,
+          conf: token_prices[i] / 100n, // 100 bps or 1% of the price of USDC
+        },
+      }));
+    }
+
+    for(let i = 0; i< nb_tokens; ++i) {
+      await Promise.all(oracle_promises)
     }
   });
 
@@ -106,17 +120,20 @@ describe('fruitbasket', () => {
             owner: owner.publicKey,
             fruitBasketGrp: frt_bsk_group,
             mint : (await tokens[index]).publicKey,
-            priceOracle : price_oracles[index].publicKey,
-            productOracle : produce_oracles[index].publicKey,
+            priceOracle : (await price_oracles[index]).publicKey,
+            productOracle : (await produce_oracles[index]).publicKey,
             tokenPool: token_pools[index],
             tokenProgram : TOKEN_PROGRAM_ID,
           },
           signers : [owner],
         }
       );
-       ++index;
     };
   } );
+
+  let basket_1 : web3.PublicKey;
+  let basket_2 : web3.PublicKey;
+  let basket_3 : web3.PublicKey;
 
   it( "Baskets created ", async() => {
     const exp = 1000000;
@@ -157,10 +174,11 @@ describe('fruitbasket', () => {
 
     // first basket
     let basket_nb = 0;
-    const [basket_1, bump_b1] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
+    const [_basket_1, bump_b1] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
     const [basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
     const components_1 = [comp_btc, comp_eth, comp_sol];
-    
+    basket_1 = _basket_1;
+
     await program.rpc.addBasket(
       basket_nb,
       bump_b1,
@@ -184,9 +202,11 @@ describe('fruitbasket', () => {
 
     // second basket
     ++basket_nb;
-    const [basket_2, bump_b2] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
+    const [_basket_2, bump_b2] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
     const [basket_2_mint, bump_b2m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
     const components_2 = [comp_sol, comp_srm, comp_mngo];
+    basket_2 = _basket_2;
+
     await program.rpc.addBasket(
       basket_nb,
       bump_b2,
@@ -210,9 +230,11 @@ describe('fruitbasket', () => {
 
     // third basket
     ++basket_nb;
-    const [basket_3, bump_b3] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
+    const [_basket_3, bump_b3] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
     const [basket_3_mint, bump_b3m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
     const components_3 = [comp_sh1, comp_sh2];
+    basket_3 = _basket_3;
+
     await program.rpc.addBasket(
       basket_nb,
       bump_b3,
@@ -234,6 +256,69 @@ describe('fruitbasket', () => {
       }
     );
   } );
+
+  it("oracle group tests", async() => {
+    let group_info : FruitBasketGroup = await program.account.fruitBasketGroup.fetch(frt_bsk_group);
+    
+    assert.ok(group_info.baseMint.equals((await usdc).publicKey));
+    assert.ok(group_info.nbUsers == 0);
+    assert.ok(group_info.numberOfBaskets == 3);
+    assert.ok(group_info.tokenCount == 8);
+    // for (let token_desc in group_info.tokenDescription){
+
+    // }
+  });
+
+  it("cache updated", async() =>{
+    await Promise.all( price_oracles.map( async(x) => {
+      await program.rpc.updatePrice(
+        {
+          accounts : {
+            group : frt_bsk_group,
+            cache : frt_bsk_cache,
+            oracleAi : (await x).publicKey,
+          }
+        }
+      );
+    }));
+  });
+  
+  it("basket priced", async () => {
+    // price basket 1
+    await program.rpc.updateBasketPrice(
+      {
+        accounts : {
+          basket : basket_1,
+          cache : frt_bsk_cache,
+        }        
+      }
+    );
+    const basket_1_info : Basket = await program.account.basket.fetch(basket_1);
+    mlog.log(basket_1_info.lastPrice);
+    mlog.log(basket_1_info.decimal);
+    mlog.log(basket_1_info.confidence);
+
+    mlog.log("basket2");
+    // price basket 2
+    await program.rpc.updateBasketPrice(
+      {
+        accounts : {
+          basket : basket_2,
+          cache : frt_bsk_cache,
+        }        
+      }
+    );
+    mlog.log("basket3");
+    // price basket 3
+    await program.rpc.updateBasketPrice(
+      {
+        accounts : {
+          basket : basket_3,
+          cache : frt_bsk_cache,
+        }        
+      }
+    );
+  });
 
   function ComponentInfo() {
     this.tokenIndex;
