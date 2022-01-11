@@ -49,8 +49,8 @@ describe('fruitbasket', () => {
 
   let tokens = [usdc, btc, eth, sol, srm, mngo, shit1, shit2];
   let token_names = ["USDC", "BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
-  let token_prices = [1000n, 40000000n, 4000000n, 200000000n, 4000000n, 140n, 1450n, 5000n];
-  let token_exp = [-3, -3, -3, -6, -6, -3, -4, -6];
+  let token_prices = [1000n, 40000000n, 4000000n, 200000000n, 4000000n, 140000n, 145000n, 5000n];
+  let token_exp = [-3, -3, -3, -6, -6, -6, -6, -6];
 
   let price_oracles = [] ;
   let produce_oracles = [];
@@ -158,19 +158,19 @@ describe('fruitbasket', () => {
     comp_srm.decimal = 6;
 
     let comp_mngo = new ComponentInfo();
-    comp_srm.tokenIndex = 5;
-    comp_srm.amount = new anchor.BN(exp * 1000); // 1000 MNGO
-    comp_srm.decimal = 6;
+    comp_mngo.tokenIndex = 5;
+    comp_mngo.amount = new anchor.BN(exp * 1000); // 1000 MNGO
+    comp_mngo.decimal = 6;
 
     let comp_sh1 = new ComponentInfo();
-    comp_srm.tokenIndex = 6;
-    comp_srm.amount = new anchor.BN(exp * 10000); // 10000 SHIT1
-    comp_srm.decimal = 6;
+    comp_sh1.tokenIndex = 6;
+    comp_sh1.amount = new anchor.BN(exp * 10000); // 10000 SHIT1
+    comp_sh1.decimal = 6;
 
     let comp_sh2 = new ComponentInfo();
-    comp_srm.tokenIndex = 7;
-    comp_srm.amount = new anchor.BN(exp * 100000); // 100000 SHIT1
-    comp_srm.decimal = 6;
+    comp_sh2.tokenIndex = 7;
+    comp_sh2.amount = new anchor.BN(exp * 100000); // 100000 SHIT1
+    comp_sh2.decimal = 6;
 
     // first basket
     let basket_nb = 0;
@@ -294,11 +294,10 @@ describe('fruitbasket', () => {
       }
     );
     const basket_1_info : Basket = await program.account.basket.fetch(basket_1);
-    mlog.log(basket_1_info.lastPrice);
-    mlog.log(basket_1_info.decimal);
-    mlog.log(basket_1_info.confidence);
+    assert.ok(basket_1_info.lastPrice.toNumber() == 1200000000);
+    assert.ok(basket_1_info.decimal == 6);
+    assert.ok(basket_1_info.confidence.toNumber() == 12000000);
 
-    mlog.log("basket2");
     // price basket 2
     await program.rpc.updateBasketPrice(
       {
@@ -308,7 +307,13 @@ describe('fruitbasket', () => {
         }        
       }
     );
-    mlog.log("basket3");
+
+    const basket_2_info : Basket = await program.account.basket.fetch(basket_2);
+    assert.ok(basket_2_info.lastPrice.toNumber() > 0);
+    assert.ok(basket_2_info.decimal == 6);
+    assert.ok(basket_2_info.confidence.toNumber() > 0);
+
+
     // price basket 3
     await program.rpc.updateBasketPrice(
       {
@@ -318,6 +323,11 @@ describe('fruitbasket', () => {
         }        
       }
     );
+    const basket_3_info : Basket = await program.account.basket.fetch(basket_3);
+    assert.ok(basket_3_info.lastPrice.toNumber() > 0);
+    assert.ok(basket_3_info.decimal == 6);
+    assert.ok(basket_3_info.confidence.toNumber() > 0);
+
   });
 
   function ComponentInfo() {
