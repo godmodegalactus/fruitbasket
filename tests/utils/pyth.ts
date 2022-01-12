@@ -1,16 +1,16 @@
-// Pyth utils to create pyth accounts and update prices
-
 import { Wallet } from "@project-serum/anchor";
 import * as pyth from "@pythnetwork/client";
 import {
     Connection,
     Keypair,
     PublicKey,
+    SystemProgram,
+    Transaction,
 } from "@solana/web3.js";
 
-import { Config } from "./config";
+import { DataManager } from "./data";
 
-const ACCOUNT_SIZE = 3312;
+const PRICE_ACCOUNT_SIZE = 3312;
 
 export interface Price {
     version?: number;
@@ -56,87 +56,45 @@ export interface Ema {
     denominator?: bigint;
 }
 
-function convertPriceType(type: string): number {
-    return 1;
-}
+export class Pyth {
+    static readonly programId = DataManager.programId;
 
-function convertPriceStatus(status: string): number {
-    return 1;
-}
+    conn: Connection;
+    wallet: Wallet;
+    config: DataManager;
 
-function getPriceDataWithDefaults({
-    version = pyth.Version2,
-    type = 0,
-    size = ACCOUNT_SIZE,
-    priceType = "price",
-    exponent = 0,
-    currentSlot = 0n,
-    validSlot = 0n,
-    twap = {},
-    productAccountKey = PublicKey.default,
-    nextPriceAccountKey = PublicKey.default,
-    aggregatePriceUpdaterAccountKey = PublicKey.default,
-    aggregatePriceInfo = {},
-    priceComponents = [],
-}: Price): Price {
-    return {
-        version,
-        type,
-        size,
-        priceType,
-        exponent,
-        currentSlot,
-        validSlot,
-        twap,
-        productAccountKey,
-        nextPriceAccountKey,
-        aggregatePriceUpdaterAccountKey,
-        aggregatePriceInfo,
-        priceComponents,
-    };
-}
+    constructor(conn: Connection, wallet: Wallet) {
+        this.conn = conn;
+        this.wallet = wallet;
+        this.config = new DataManager(conn, wallet);
+    }
 
-function getPriceInfoWithDefaults({
-    price = 0n,
-    conf = 0n,
-    status = "trading",
-    corpAct = "no_corp_act",
-    pubSlot = 0n, }: PriceInfo): PriceInfo {
-    return {
-        price,
-        conf,
-        status,
-        corpAct,
-        pubSlot,
-    };
-}
+    async createPriceAccount(): Promise<Keypair> {
+        return this.config.createAccount(PRICE_ACCOUNT_SIZE);
+    }
 
-function getEmaWithDefaults({
-    valueComponent = 0n,
-    denominator = 0n,
-    numerator = 0n,}: Ema): Ema {
-    return {
-        valueComponent,
-        denominator,
-        numerator,
-    };
-}
+    async createProductAccount(): Promise<Keypair> {
+        return this.createPriceAccount();
+    }
 
-function getProductWithDefaults({
-    version = pyth.Version2,
-    atype = 2,
-    size = 0,
-    priceAccount = PublicKey.default,
-    attributes = {},}: Product): Product {
-    return {
-        version,
-        atype,
-        size,
-        priceAccount,
-        attributes,
-    };
-}
+    async updatePriceAccount(account: Keypair, data: Price) {
+        const buf = Buffer.alloc(512);
+        const d = getPriceDataWithDefaults(data);
+        d.aggregatePriceInfo = getPriceInfoWithDefaults(d.aggregatePriceInfo);
+        d.twap = getEmaWithDefaults(d.twap);
 
+        writePriceBuffer(buf, 0, d);
+        await this.config.store(account, 0, buf);
+    }
+
+    async updateProductAccount(account: Keypair, data: Product) {
+        const buf = Buffer.alloc(512);
+        const d = getProductWithDefaults(data);
+
+        writeProductBuffer(buf, 0, d);
+        await this.config.store(account, 0, buf);
+    }
+}
 
 function writePublicKeyBuffer(buf: Buffer, offset: number, key: PublicKey) {
     buf.write(key.toBuffer().toString("binary"), offset, "binary");
@@ -222,42 +180,86 @@ function writeProductBuffer(buf: Buffer, offset: number, product: Product) {
     }
 }
 
-export class Pyth {
-    static readonly programId = Config.programId;
+function convertPriceType(type: string): number {
+    return 1;
+}
 
-    conn: Connection;
-    wallet: Wallet;
-    config: Config;
+function convertPriceStatus(status: string): number {
+    return 1;
+}
 
-    constructor(config : Config) {
-        this.conn = config.conn;
-        this.wallet = config.wallet;
-        this.config = config;
-    }
+function getPriceDataWithDefaults({
+    version = pyth.Version2,
+    type = 0,
+    size = PRICE_ACCOUNT_SIZE,
+    priceType = "price",
+    exponent = 0,
+    currentSlot = 0n,
+    validSlot = 0n,
+    twap = {},
+    productAccountKey = PublicKey.default,
+    nextPriceAccountKey = PublicKey.default,
+    aggregatePriceUpdaterAccountKey = PublicKey.default,
+    aggregatePriceInfo = {},
+    priceComponents = [],
+}: Price): Price {
+    return {
+        version,
+        type,
+        size,
+        priceType,
+        exponent,
+        currentSlot,
+        validSlot,
+        twap,
+        productAccountKey,
+        nextPriceAccountKey,
+        aggregatePriceUpdaterAccountKey,
+        aggregatePriceInfo,
+        priceComponents,
+    };
+}
 
-    async createPriceAccount(): Promise<Keypair> {
-        return this.config.createAccount(ACCOUNT_SIZE);
-    }
+function getPriceInfoWithDefaults({
+    price = 0n,
+    conf = 0n,
+    status = "trading",
+    corpAct = "no_corp_act",
+    pubSlot = 0n,
+}: PriceInfo): PriceInfo {
+    return {
+        price,
+        conf,
+        status,
+        corpAct,
+        pubSlot,
+    };
+}
 
-    async createProductAccount(): Promise<Keypair> {
-        return this.createPriceAccount();
-    }
+function getEmaWithDefaults({
+    valueComponent = 0n,
+    denominator = 0n,
+    numerator = 0n,
+}: Ema): Ema {
+    return {
+        valueComponent,
+        denominator,
+        numerator,
+    };
+}
 
-    async updatePriceAccount(account: Keypair, data: Price) {
-        const buf = Buffer.alloc(512);
-        const d = getPriceDataWithDefaults(data);
-        d.aggregatePriceInfo = getPriceInfoWithDefaults(d.aggregatePriceInfo);
-        d.twap = getEmaWithDefaults(d.twap);
-
-        writePriceBuffer(buf, 0, d);
-        await this.config.store(account, 0, buf);
-    }
-
-    async updateProductAccount(account: Keypair, data: Product) {
-        const buffer = Buffer.alloc(512);
-        const dat = getProductWithDefaults(data);
-
-        writeProductBuffer(buffer, 0, dat);
-        await this.config.store(account, 0, buffer);
-    }
+function getProductWithDefaults({
+    version = pyth.Version2,
+    atype = 2,
+    size = 0,
+    priceAccount = PublicKey.default,
+    attributes = {},
+}: Product): Product {
+    return {
+        version,
+        atype,
+        size,
+        priceAccount,
+        attributes,
+    };
 }

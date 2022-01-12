@@ -1,292 +1,289 @@
-import * as anchor from "@project-serum/anchor";
 import { Market, DexInstructions } from "@project-serum/serum";
-import * as web3 from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, u64 } from "@solana/spl-token";
-import { Config } from "./config";
-import { PublicKey } from "@solana/web3.js";
-import { TestToken } from "./testutils";
-export const DEX_ID = new PublicKey(
-  "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
-);
+import {
+    Keypair,
+    LAMPORTS_PER_SOL,
+    PublicKey,
+    SystemProgram,
+    TransactionInstruction,
+} from "@solana/web3.js";
+import { BN } from "@project-serum/anchor";
+import { Token, TOKEN_PROGRAM_ID, AccountLayout as TokenAccountLayout } from "@solana/spl-token";
+import { TestUtils, toPublicKeys } from "./test_utils";
+import { TestToken } from "./test_utils";
 
-//creates a order book
+export const DEX_ID = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
+
+export class SerumUtils {
+    private utils: TestUtils;
+    private dex_id: PublicKey;
+
+    constructor(utils: TestUtils) {
+        this.utils = utils;
+        this.dex_id = DEX_ID;
+    }
+
+    private async createAccountIx(
+        account: PublicKey,
+        space: number,
+        programId: PublicKey
+    ): Promise<TransactionInstruction> {
+        return SystemProgram.createAccount({
+            newAccountPubkey: account,
+            fromPubkey: this.utils.payer().publicKey,
+            lamports: await this.utils
+                .connection()
+                .getMinimumBalanceForRentExemption(space),
+            space,
+            programId,
+        });
+    }
+
+    /**
+     * Create a new Serum market
+     */
+    public async createMarket(info: CreateMarketInfo): Promise<Market> {
+        const market = Keypair.generate();
+        const requestQueue = Keypair.generate();
+        const eventQueue = Keypair.generate();
+        const bids = Keypair.generate();
+        const asks = Keypair.generate();
+        const quoteDustThreshold = new BN(100);
+
+        const [vaultOwner, vaultOwnerBump] = await this.findVaultOwner(
+            market.publicKey
+        );
+
+        const [baseVault, quoteVault] = await Promise.all([
+            this.utils.createTokenAccount(
+                info.baseToken,
+                vaultOwner,
+                new BN(0)
+            ),
+            this.utils.createTokenAccount(
+                info.quoteToken,
+                vaultOwner,
+                new BN(0)
+                ),
+            ]);
+            
+        const initMarketTx = this.utils.transaction().add(
+            await this.createAccountIx(
+                market.publicKey,
+                Market.getLayout(this.dex_id).span,
+                this.dex_id
+            ),
+            await this.createAccountIx(
+                requestQueue.publicKey,
+                5132,
+                this.dex_id
+            ),
+            await this.createAccountIx(
+                eventQueue.publicKey,
+                262156,
+                this.dex_id
+            ),
+            await this.createAccountIx(bids.publicKey, 65548, this.dex_id),
+            await this.createAccountIx(asks.publicKey, 65548, this.dex_id),
+            DexInstructions.initializeMarket(
+                toPublicKeys({
+                    market,
+                    requestQueue,
+                    eventQueue,
+                    bids,
+                    asks,
+                    baseVault,
+                    quoteVault,
+                    baseMint: info.baseToken.publicKey,
+                    quoteMint: info.quoteToken.publicKey,
+
+                    baseLotSize: new BN(info.baseLotSize),
+                    quoteLotSize: new BN(info.quoteLotSize),
+
+                    feeRateBps: info.feeRateBps,
+                    vaultSignerNonce: vaultOwnerBump,
+
+                    quoteDustThreshold,
+                    programId: this.dex_id,
+                })
+            )
+        );
+
+        await this.utils.sendAndConfirmTransaction(initMarketTx, [
+            market,
+            requestQueue,
+            eventQueue,
+            bids,
+            asks,
+        ]);
+
+        return await Market.load(
+            this.utils.connection(),
+            market.publicKey,
+            undefined,
+            this.dex_id
+        );
+    }
+
+    public async createMarketMaker(
+        lamports: number,
+        tokens: [Token, BN][]
+    ): Promise<MarketMaker> {
+        const account = await this.utils.createWallet(lamports);
+        const tokenAccounts = {};
+        const transactions = [];
+
+        for (const [token, amount] of tokens) {
+            const publicKey = await this.utils.createTokenAccount(
+                token,
+                account,
+                amount
+            );
+
+            tokenAccounts[token.publicKey.toBase58()] = publicKey;
+        }
+
+        return new MarketMaker(this.utils, account, tokenAccounts);
+    }
+
+    public async createAndMakeMarket(baseToken: TestToken, quoteToken: TestToken, marketPrice: number) {
+        const market = await this.createMarket({
+            baseToken,
+            quoteToken,
+            baseLotSize: 100000,
+            quoteLotSize: 100,
+            feeRateBps: 22,
+        });
+        const marketMaker = await this.createMarketMaker(
+            1 * LAMPORTS_PER_SOL,
+            [
+                [baseToken, baseToken.amount(100000)],
+                [quoteToken, quoteToken.amount(50000 * marketPrice)],
+            ]
+        );
+
+        const bids = MarketMaker.makeOrders([[marketPrice * 0.995, 10000]]);
+        const asks = MarketMaker.makeOrders([[marketPrice * 1.005, 10000]]);
+
+        await marketMaker.placeOrders(market, bids, asks);
+        return market;
+    }
+
+    async findVaultOwner(market: PublicKey): Promise<[PublicKey, BN]> {
+        const bump = new BN(0);
+    
+        while (bump.toNumber() < 255) {
+            try {
+                const vaultOwner = await PublicKey.createProgramAddress(
+                    [market.toBuffer(), bump.toArrayLike(Buffer, "le", 8)],
+                    this.dex_id
+                );
+    
+                return [vaultOwner, bump];
+            } catch (_e) {
+                bump.iaddn(1);
+            }
+        }
+    
+        throw new Error("no seed found for vault owner");
+    }
+    
+}
+
 export interface CreateMarketInfo {
-  token: TestToken;
-  quoteToken: TestToken;
-  tokenLotSize: number;
-  quoteLotSize: number;
-  feeRateBps: number;
+    baseToken: Token;
+    quoteToken: Token;
+    baseLotSize: number;
+    quoteLotSize: number;
+    feeRateBps: number;
 }
 
 export interface Order {
-  price: number;
-  size: number;
+    price: number;
+    size: number;
 }
 
-export class Serum {
-  private config: Config;
+export class MarketMaker {
+    public account: Keypair;
+    public tokenAccounts: { [mint: string]: PublicKey };
 
-  constructor(config: Config) {
-    this.config = config;
-  }
+    private utils: TestUtils;
 
-  public async createMarketsAndMakers(
-    tokens: TestToken[],
-    market_prices: bigint[],
-    exps: number[]
-  ): Promise<Market[]> {
-    let quote_token = tokens[0];
-    let other_tokens = tokens.slice(1);
-    let markets = Promise.all(
-      other_tokens.map(async (x) => {
-        return this.createMarket({
-          token: x,
-          quoteToken: quote_token,
-          quoteLotSize: 100000,
-          tokenLotSize: 100000,
-          feeRateBps: 30,
-        });
-      })
-    );
-
-    let maker1_tokens: [TestToken, anchor.BN][] = [];
-    maker1_tokens.push([quote_token, new anchor.BN(10000000000)]);
-    other_tokens.forEach((x) => maker1_tokens.push([x, new anchor.BN(10000)]));
-    let maker_1 = await this.createMarketMaker(
-      1 * web3.LAMPORTS_PER_SOL,
-      maker1_tokens
-    );
-
-    let maker2_tokens: [TestToken, anchor.BN][] = [];
-    maker2_tokens.push([quote_token, new anchor.BN(10000000000)]);
-    other_tokens.forEach((x) =>
-      maker2_tokens.push([x, new anchor.BN(1000000)])
-    );
-    let maker_2 = await this.createMarketMaker(
-      1 * web3.LAMPORTS_PER_SOL,
-      maker2_tokens
-    );
-
-    [...Array(other_tokens.length).keys()].map(async (x) => {
-      let market_price = Number(market_prices[x + 1]) * 10 ** exps[x + 1];
-      const bids = Maker.makeOrders([
-        [market_price * 0.998, 100],
-        [market_price * 0.995, 1000],
-        [market_price * 0.99, 10000],
-        [market_price * 0.9, 100000],
-      ]);
-      const asks = Maker.makeOrders([
-        [market_price * 1.002, 100],
-        [market_price * 1.005, 1000],
-        [market_price * 1.01, 10000],
-        [market_price * 1.1, 100000],
-      ]);
-      await maker_1.placeOrders(await markets[x], bids, asks);
-      return await markets[x];
-    });
-    return markets;
-  }
-
-  public async createMarketMaker(
-    lamports: number,
-    tokens: [TestToken, anchor.BN][]
-  ) {
-    const account = await this.config.createWallet(lamports);
-    const token_accounts = {};
-    for (const [token, amount] of tokens) {
-      const publicKey = await this.config.createTokenAccount(
-        token,
-        account.publicKey,
-        amount
-      );
-
-      token_accounts[token.publicKey.toBase58()] = publicKey;
-    }
-    return new Maker(this.config, account, token_accounts);
-  }
-
-  public async createMarket(info: CreateMarketInfo): Promise<Market> {
-    const market = web3.Keypair.generate();
-    const requestQueue = web3.Keypair.generate();
-    const eventQueue = web3.Keypair.generate();
-    const bids = web3.Keypair.generate();
-    const asks = web3.Keypair.generate();
-    const quoteDustThreshold = new anchor.BN(100);
-
-    const [vaultOwner, vaultOwnerBump] =
-      await web3.PublicKey.findProgramAddress(
-        [Buffer.from("market")],
-        market.publicKey
-      );
-
-    const [tokenVault, quoteVault] = await Promise.all([
-      this.config.createTokenAccount(info.token, vaultOwner, new anchor.BN(0)),
-      this.config.createTokenAccount( info.quoteToken, vaultOwner, new anchor.BN(0)),
-    ]);
-
-    const initMarketTx = (await this.config.transaction()).add(
-      await this.createAccount(
-        market.publicKey,
-        Market.getLayout(DEX_ID).span,
-        DEX_ID
-      ),
-      await this.createAccount(requestQueue.publicKey, 5132, DEX_ID),
-      await this.createAccount(eventQueue.publicKey, 262156, DEX_ID),
-      await this.createAccount(bids.publicKey, 65548, DEX_ID),
-      await this.createAccount(asks.publicKey, 65548, DEX_ID),
-      DexInstructions.initializeMarket(
-        this.getPublicKeys({
-          market,
-          requestQueue,
-          eventQueue,
-          bids,
-          asks,
-          tokenVault,
-          quoteVault,
-          baseMint: info.token.publicKey,
-          quoteMint: info.quoteToken.publicKey,
-          baseLotSize: new anchor.BN(info.tokenLotSize),
-          quoteLotSize: new anchor.BN(info.quoteLotSize),
-          feeRateBps: new anchor.BN(info.feeRateBps),
-          vaultSignerNonce: new anchor.BN(vaultOwnerBump),
-          quoteDustThreshold,
-          programId: DEX_ID,
-        })
-      )
-    );
-
-    await this.config.sendAndConfirmTransaction(initMarketTx, [
-      market,
-      requestQueue,
-      eventQueue,
-      bids,
-      asks,
-    ]);
-
-    return await Market.load(
-      this.config.connection(),
-      market.publicKey,
-      undefined,
-      DEX_ID
-    );
-  }
-
-  private getPublicKeys(obj: Record<string, string | PublicKey | any>): any {
-    const newObj = {};
-
-    for (const key in obj) {
-      const value = obj[key];
-
-      if (typeof value == "string") {
-        newObj[key] = new PublicKey(value);
-      } else if (typeof value == "object" && "publicKey" in value) {
-        newObj[key] = value.publicKey;
-      } else {
-        newObj[key] = value;
-      }
+    constructor(
+        utils: TestUtils,
+        account: Keypair,
+        tokenAccounts: { [mint: string]: PublicKey }
+    ) {
+        this.utils = utils;
+        this.account = account;
+        this.tokenAccounts = tokenAccounts;
     }
 
-    return newObj;
-  }
+    static makeOrders(orders: [number, number][]): Order[] {
+        return orders.map(([price, size]) => ({ price, size }));
+    }
 
-  private async createAccount(
-    account: PublicKey,
-    space: number,
-    programId: PublicKey
-  ): Promise<web3.TransactionInstruction> {
-    return web3.SystemProgram.createAccount({
-      newAccountPubkey: account,
-      fromPubkey: this.config.payer().publicKey,
-      lamports: await this.config
-        .connection()
-        .getMinimumBalanceForRentExemption(space),
-      space,
-      programId,
-    });
-  }
-}
+    async placeOrders(market: Market, bids: Order[], asks: Order[]) {
+        await this.utils.connection().confirmTransaction(
+            await this.utils.connection().requestAirdrop(this.account.publicKey, 20 * LAMPORTS_PER_SOL),
+            "confirmed"
+          );
 
-export class Maker {
-  private config: Config;
-  public account: web3.Keypair;
-  public tokenAccounts: { [mint: string]: PublicKey };
+        const baseTokenAccount =
+            this.tokenAccounts[market.baseMintAddress.toBase58()];
 
-  constructor(
-    config: Config,
-    account: web3.Keypair,
-    tokenAccounts: { [mint: string]: PublicKey }
-  ) {
-    this.config = config;
-    this.account = account;
-    this.tokenAccounts = tokenAccounts;
-  }
+        const quoteTokenAccount =
+            this.tokenAccounts[market.quoteMintAddress.toBase58()];
 
-  static makeOrders(orders: [number, number][]): Order[] {
-    return orders.map(([price, size]) => ({ price, size }));
-  }
+        const askOrderTxs = [];
+        const bidOrderTxs = [];
 
-  async placeOrders(market: Market, bids: Order[], asks: Order[]) {
-    const token_account = this.tokenAccounts[market.baseMintAddress.toBase58()];
-    const quote_token_acc =
-      this.tokenAccounts[market.quoteMintAddress.toBase58()];
+        const placeOrderDefaultParams = {
+            owner: this.account.publicKey,
+            clientId: undefined,
+            openOrdersAddressKey: undefined,
+            openOrdersAccount: undefined,
+            feeDiscountPubkey: null,
+        };
 
-    const placeOrderDefaultParams = {
-      owner: this.account.publicKey,
-      clientId: undefined,
-      openOrdersAddressKey: undefined,
-      openOrdersAccount: undefined,
-      feeDiscountPubkey: null,
-    };
+        for (const entry of asks) {
+            const { transaction, signers } =
+                await market.makePlaceOrderTransaction(
+                    this.utils.connection(),
+                    {
+                        payer: baseTokenAccount,
+                        side: "sell",
+                        price: entry.price,
+                        size: entry.size,
+                        orderType: "postOnly",
+                        selfTradeBehavior: "abortTransaction",
+                        ...placeOrderDefaultParams,
+                    }
+                );
 
-    const ask_orders = [];
-    const bid_orders = [];
-
-    for (const entry of asks) {
-      const { transaction, signers } = await market.makePlaceOrderTransaction(
-        this.config.connection(),
-        {
-          payer: token_account,
-          side: "sell",
-          price: entry.price,
-          size: entry.size,
-          orderType: "postOnly",
-          selfTradeBehavior: "abortTransaction",
-          ...placeOrderDefaultParams,
+            askOrderTxs.push([transaction, [this.account, ...signers]]);
         }
-      );
 
-      ask_orders.push([transaction, [this.account, ...signers]]);
-    }
+        for (const entry of bids) {
+            const { transaction, signers } =
+                await market.makePlaceOrderTransaction(
+                    this.utils.connection(),
+                    {
+                        payer: quoteTokenAccount,
+                        side: "buy",
+                        price: entry.price,
+                        size: entry.size,
+                        orderType: "postOnly",
+                        selfTradeBehavior: "abortTransaction",
+                        ...placeOrderDefaultParams,
+                    }
+                );
 
-    for (const entry of bids) {
-      const { transaction, signers } = await market.makePlaceOrderTransaction(
-        this.config.connection(),
-        {
-          payer: quote_token_acc,
-          side: "buy",
-          price: entry.price,
-          size: entry.size,
-          orderType: "postOnly",
-          selfTradeBehavior: "abortTransaction",
-          ...placeOrderDefaultParams,
+            bidOrderTxs.push([transaction, [this.account, ...signers]]);
         }
-      );
 
-      bid_orders.push([transaction, [this.account, ...signers]]);
+        await this.utils.sendAndConfirmTransactionSet(
+            ...askOrderTxs,
+            ...bidOrderTxs
+        );
     }
-
-    const signatures_ask = await Promise.all(
-      ask_orders.map(([t, s]) => this.config.conn.sendTransaction(t, s))
-    );
-    await Promise.all(
-      signatures_ask.map((s) => this.config.conn.confirmTransaction(s))
-    );
-
-    const signatures_bid = await Promise.all(
-      ask_orders.map(([t, s]) => this.config.conn.sendTransaction(t, s))
-    );
-    await Promise.all(
-      signatures_bid.map((s) => this.config.conn.confirmTransaction(s))
-    );
-  }
 }

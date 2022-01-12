@@ -10,14 +10,13 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 
-import * as testutils from './utils/testutils';
 import * as pyth from './utils/pyth'
 import * as serum from './utils/serum'
-import { Config } from './utils/config';
 import { token } from '@project-serum/anchor/dist/cjs/utils';
 import mlog from 'mocha-logger';
 import { assert } from "chai";
-import { sleep } from '@blockworks-foundation/mango-client';
+import { QUOTE_INDEX, sleep } from '@blockworks-foundation/mango-client';
+import { TestUtils } from './utils/test_utils';
 
 type Connection = web3.Connection;
 
@@ -29,15 +28,14 @@ describe('fruitbasket', () => {
   const connection = provider.connection;
   const wallet = provider.wallet;
   //configure test utils
-  const test_utils = new testutils.TestUtils(connection, provider.wallet);
-
   const program = anchor.workspace.Fruitbasket as Program<Fruitbasket>;
   type FruitBasketGroup = anchor.IdlAccounts<Fruitbasket>["fruitBasketGroup"];
   type Basket = anchor.IdlAccounts<Fruitbasket>["basket"];
 
   const owner = web3.Keypair.generate();
-  const config = new Config(provider.connection, provider.wallet);
-  const oracle = new pyth.Pyth(config);
+  const test_utils = new TestUtils(provider.connection, provider.wallet);
+  let serum_utils = new serum.SerumUtils( test_utils);
+  let oracle = new pyth.Pyth(connection, wallet);
 
   // create some tokens
   const nb_tokens = 8;
@@ -54,6 +52,27 @@ describe('fruitbasket', () => {
   let token_names = ["USDC", "BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
   let token_prices = [1000n, 40000000n, 4000000n, 200000000n, 4000000n, 140000n, 145000n, 5000n];
   let token_exp = [-3, -3, -3, -6, -6, -6, -6, -6];
+  
+  // check if serum is loaded
+  it("test market creation", async() => {
+    await provider.connection.confirmTransaction(
+      await provider.connection.requestAirdrop(provider.wallet.publicKey, 1000000000000),
+      "confirmed"
+    );
+
+    await serum_utils.createMarket({
+      baseToken: await sol,
+      quoteToken: await usdc,
+      baseLotSize: 100000,
+      quoteLotSize: 100,
+      feeRateBps: 22,}
+    );
+
+    await serum_utils.createAndMakeMarket(
+      await eth, await usdc, 1
+    );
+  });
+
 
   let price_oracles = [] ;
   let produce_oracles = [];
@@ -333,11 +352,16 @@ describe('fruitbasket', () => {
 
   });
 
-  let serum_utils = new serum.Serum(config);
   it( "Market intialized", async() => {
     let t = await Promise.all(tokens);
-    await serum_utils.createMarketsAndMakers(t, token_prices, token_exp );
-    sleep(60 * 1000);
+    let other_tokens = t.slice(1);
+    let quote_token = t[0];
+    let markets_by_tokens = await Promise.all(
+      Array.from(Array(other_tokens.length).keys()).map(x => {
+         const marketPrice = Number(token_prices[x]) * (10 ** token_exp[x]);
+        return serum_utils.createAndMakeMarket(other_tokens[x], quote_token, marketPrice);
+      })
+    );
   } );
 
   function ComponentInfo() {
