@@ -17,16 +17,7 @@ export class TestToken extends Token {
         this.decimals = decimals;
     }
   
-    /**
-     * Convert a token amount to the integer format for the mint
-     * @param token The token mint
-     * @param amount The amount of tokens
-     */
-    amount(amount: u64 | number): u64 {
-        if (typeof amount == "number") {
-            amount = new u64(amount);
-        }
-  
+    amount(amount: u64): u64 {
         const one_unit = new u64(10).pow(new u64(this.decimals));
         const value = amount.mul(one_unit);
   

@@ -229,10 +229,10 @@ export class Pyth {
     wallet: Wallet;
     config: Config;
 
-    constructor(conn: Connection, wallet: Wallet) {
-        this.conn = conn;
-        this.wallet = wallet;
-        this.config = new Config(conn, wallet);
+    constructor(config : Config) {
+        this.conn = config.conn;
+        this.wallet = config.wallet;
+        this.config = config;
     }
 
     async createPriceAccount(): Promise<Keypair> {

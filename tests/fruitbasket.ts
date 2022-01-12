@@ -12,9 +12,12 @@ import {
 
 import * as testutils from './utils/testutils';
 import * as pyth from './utils/pyth'
+import * as serum from './utils/serum'
+import { Config } from './utils/config';
 import { token } from '@project-serum/anchor/dist/cjs/utils';
 import mlog from 'mocha-logger';
 import { assert } from "chai";
+import { sleep } from '@blockworks-foundation/mango-client';
 
 type Connection = web3.Connection;
 
@@ -33,8 +36,8 @@ describe('fruitbasket', () => {
   type Basket = anchor.IdlAccounts<Fruitbasket>["basket"];
 
   const owner = web3.Keypair.generate();
-
-  const oracle = new pyth.Pyth(provider.connection, provider.wallet);
+  const config = new Config(provider.connection, provider.wallet);
+  const oracle = new pyth.Pyth(config);
 
   // create some tokens
   const nb_tokens = 8;
@@ -329,6 +332,13 @@ describe('fruitbasket', () => {
     assert.ok(basket_3_info.confidence.toNumber() > 0);
 
   });
+
+  let serum_utils = new serum.Serum(config);
+  it( "Market intialized", async() => {
+    let t = await Promise.all(tokens);
+    await serum_utils.createMarketsAndMakers(t, token_prices, token_exp );
+    sleep(60 * 1000);
+  } );
 
   function ComponentInfo() {
     this.tokenIndex;
