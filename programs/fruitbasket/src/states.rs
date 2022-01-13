@@ -48,9 +48,9 @@ pub struct TokenDescription
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Copy)]
 #[repr(C)]
 pub struct BasketComponentDescription{
-    token_index : u8,
-    amount : u64,
-    decimal : u8,
+    pub token_index : u8,
+    pub amount : u64,
+    pub decimal : u8,
 }
 
 impl Basket {
@@ -91,4 +91,19 @@ impl Basket {
         assert!(self.last_price > 0);
         Ok(())
     }
+}
+
+
+pub struct MarketAccounts<'info> {
+    pub base_token_mint : AccountInfo<'info>,
+    pub market: AccountInfo<'info>,
+    pub open_orders: AccountInfo<'info>,
+    pub request_queue: AccountInfo<'info>,
+    pub event_queue: AccountInfo<'info>,
+    pub bids: AccountInfo<'info>,
+    pub asks: AccountInfo<'info>,
+    pub token_vault: AccountInfo<'info>,
+    pub quote_token_vault: AccountInfo<'info>,
+    pub vault_signer: AccountInfo<'info>,
+    pub token_pool : AccountInfo<'info>,
 }
