@@ -2,7 +2,7 @@ use fixed::traits::Fixed;
 
 use crate::*;
 use anchor_spl::dex::serum_dex::matching::{OrderType, Side};
-use std::num::NonZeroU64;
+use std::{num::NonZeroU64};
 use anchor_spl::dex::serum_dex::instruction::SelfTradeBehavior;
 
 pub fn initialize_group(
@@ -56,7 +56,19 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
     }
     group.token_description[current].token_pool = *ctx.accounts.token_pool.to_account_info().key;
     group.token_description[current].token_decimal = ctx.accounts.mint.decimals;
+
     group.token_count += 1;
+    if ctx.accounts.market.key() == empty::ID {
+        return Ok(());
+    }
+    //create and assign open order
+    let open_order_instruction = dex::InitOpenOrders {
+        open_orders: ctx.accounts.open_orders_account.to_account_info().clone(),
+        authority: ctx.accounts.owner.clone(),
+        market: ctx.accounts.market.clone(),
+        rent: ctx.accounts.rent.clone(),
+    };
+    let oo_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), open_order_instruction);
     //group.token
     Ok(())
 }
@@ -165,7 +177,7 @@ pub fn buy_basket<'info>(
     // temporarily change authority to program authority to enable swap
     change_authority(&ctx.accounts.paying_account.to_account_info(), 
                     &ctx.accounts.user, 
-                    &ctx.accounts.authority, 
+                    ctx.accounts.authority.key(), 
                     &ctx.accounts.token_program, 
                     None)?;
     
@@ -203,7 +215,7 @@ pub fn buy_basket<'info>(
     // change authority back
     change_authority(&ctx.accounts.paying_account.to_account_info(), 
                     &ctx.accounts.authority, 
-                    &ctx.accounts.user, 
+                    ctx.accounts.user.key(), 
                     &ctx.accounts.token_program, 
                     Some(&[seeds]))?;
     // TODO mint basket tokens to the user
@@ -270,7 +282,7 @@ fn settle_funds<'info>( ctx: &Context<'_, '_, '_, 'info, BuyBasket<'info>>,
 
 fn change_authority<'info>(acc : &AccountInfo<'info>, 
                           from : &AccountInfo<'info>, 
-                          to: &AccountInfo<'info>, 
+                          to: Pubkey, 
                           token_program: &AccountInfo<'info>, 
                           seeds : Option<&[&[&[u8]]]>) -> ProgramResult{
 
@@ -282,5 +294,5 @@ fn change_authority<'info>(acc : &AccountInfo<'info>,
     if let Some(signer_seeds) = seeds {
         cpi = cpi.with_signer(signer_seeds);
     }
-    token::set_authority( cpi,  AuthorityType::AccountOwner, Some(*to.key))
+    token::set_authority( cpi,  AuthorityType::AccountOwner, Some(to))
 }

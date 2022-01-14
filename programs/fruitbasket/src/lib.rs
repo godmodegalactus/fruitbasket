@@ -20,7 +20,12 @@ const FRUIT_BASKET_CACHE : &[u8] = b"fruitbasket_cache";
 const FRUIT_BASKET_AUTHORITY : &[u8] = b"fruitbasket_auth";
 const FRUIT_BASKET : &[u8] = b"fruitbasket";
 const FRUIT_BASKET_MINT : &[u8] = b"fruitbasket_mint";
-const FRUIT_BASKET_USER : &[u8] = b"fruitbasket_user";
+
+mod empty {
+    use super::*;
+    declare_id!("HJt8Tjdsc9ms9i4WCZEzhzr4oyf3ANcdzXrNdLPFqm3M");
+}
+
 #[program]
 pub mod fruitbasket {
     use super::*;

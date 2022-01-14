@@ -15,7 +15,7 @@ export const DEX_ID = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFi
 
 export class SerumUtils {
     private utils: TestUtils;
-    private dex_id: PublicKey;
+    public dex_id: PublicKey;
 
     constructor(utils: TestUtils) {
         this.utils = utils;
@@ -95,13 +95,10 @@ export class SerumUtils {
                     quoteVault,
                     baseMint: info.baseToken.publicKey,
                     quoteMint: info.quoteToken.publicKey,
-
                     baseLotSize: new BN(info.baseLotSize),
                     quoteLotSize: new BN(info.quoteLotSize),
-
                     feeRateBps: info.feeRateBps,
                     vaultSignerNonce: vaultOwnerBump,
-
                     quoteDustThreshold,
                     programId: this.dex_id,
                 })
@@ -145,7 +142,7 @@ export class SerumUtils {
         return new MarketMaker(this.utils, account, tokenAccounts);
     }
 
-    public async createAndMakeMarket(baseToken: TestToken, quoteToken: TestToken, marketPrice: number) {
+    public async createAndMakeMarket(baseToken: TestToken, quoteToken: TestToken, marketPrice: number): Promise<Market> {
         const market = await this.createMarket({
             baseToken,
             quoteToken,

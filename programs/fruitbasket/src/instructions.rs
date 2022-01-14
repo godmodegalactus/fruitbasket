@@ -1,5 +1,5 @@
 use anchor_spl::token::Token;
-
+use anchor_spl::dex::serum_dex::state::OpenOrders;
 use crate::*;
 
 #[derive(Accounts)]
@@ -40,7 +40,14 @@ pub struct AddToken<'info>{
               constraint = token_pool.owner == *owner.key,
               constraint = token_pool.mint == *mint.to_account_info().key)]
     pub token_pool : Account<'info, TokenAccount>,
-    pub token_program : Program<'info, anchor_spl::token::Token>,
+
+    pub market : AccountInfo<'info>,
+    #[account(mut)]
+    pub open_orders_account : AccountInfo<'info>,
+
+    pub token_program : AccountInfo<'info>,
+    pub dex_program : AccountInfo<'info>,
+    pub rent : AccountInfo<'info>,
 }
 
 #[derive(Accounts)]

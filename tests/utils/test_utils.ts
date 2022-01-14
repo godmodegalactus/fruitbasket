@@ -7,6 +7,7 @@ import {
     u64,
 } from "@solana/spl-token";
 import {
+    Account,
     Connection,
     Keypair,
     PublicKey,
@@ -34,6 +35,27 @@ export class TestUtils {
         this.wallet = funded;
         this.authority = this.wallet.payer;
         this.pyth = new Pyth(conn, funded);
+    }
+
+    async createAccount( owner : Keypair, programId : PublicKey, space: number): Promise<Account> {
+        const newAccount = new Account();
+        const createTx = new Transaction().add(
+            SystemProgram.createAccount({
+                fromPubkey: owner.publicKey,
+                newAccountPubkey: newAccount.publicKey,
+                programId: programId,
+                lamports: await this.conn.getMinimumBalanceForRentExemption(
+                    space
+                ),
+                space,
+            })
+        );
+
+        await sendAndConfirmTransaction(this.conn, createTx, [
+            owner,
+            newAccount,
+        ]);
+        return newAccount;
     }
 
     async updateBlockhash() {

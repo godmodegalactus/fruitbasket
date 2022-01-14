@@ -9,14 +9,14 @@ import {
   u64,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
+import { Market, OpenOrders } from "@project-serum/serum";
 
 import * as pyth from './utils/pyth'
 import * as serum from './utils/serum'
 import { token } from '@project-serum/anchor/dist/cjs/utils';
 import mlog from 'mocha-logger';
 import { assert } from "chai";
-import { QUOTE_INDEX, sleep } from '@blockworks-foundation/mango-client';
-import { TestUtils } from './utils/test_utils';
+import { TestToken, TestUtils } from './utils/test_utils';
 
 type Connection = web3.Connection;
 
@@ -36,6 +36,7 @@ describe('fruitbasket', () => {
   const test_utils = new TestUtils(provider.connection, provider.wallet);
   let serum_utils = new serum.SerumUtils( test_utils);
   let oracle = new pyth.Pyth(connection, wallet);
+  const programId = program.programId;
 
   // create some tokens
   const nb_tokens = 8;
@@ -52,28 +53,24 @@ describe('fruitbasket', () => {
   let token_names = ["USDC", "BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
   let token_prices = [1000n, 40000000n, 4000000n, 200000000n, 4000000n, 140000n, 145000n, 5000n];
   let token_exp = [-3, -3, -3, -6, -6, -6, -6, -6];
-  
-  // check if serum is loaded
-  it("test market creation", async() => {
-    await provider.connection.confirmTransaction(
-      await provider.connection.requestAirdrop(provider.wallet.publicKey, 1000000000000),
-      "confirmed"
-    );
 
-    await serum_utils.createMarket({
-      baseToken: await sol,
-      quoteToken: await usdc,
-      baseLotSize: 100000,
-      quoteLotSize: 100,
-      feeRateBps: 22,}
+  let markets_by_tokens: Promise<Market[]> = null;
+  it( "Market intialized", async() => {
+    let t = await Promise.all(tokens);
+    let other_tokens = t.slice(1);
+    let quote_token = t[0];
+    markets_by_tokens = Promise.all(
+      Array.from(Array(other_tokens.length).keys()).map(x => {
+         const marketPrice = Number(token_prices[x]) * (10 ** token_exp[x]);
+        return serum_utils.createAndMakeMarket(other_tokens[x], quote_token, marketPrice);
+      })
     );
-
-    await serum_utils.createAndMakeMarket(
-      await eth, await usdc, 1
-    );
+    // await for all markets to get initialized
+    await markets_by_tokens;
   });
 
-
+  
+  // check if serum is loaded
   let price_oracles = [] ;
   let produce_oracles = [];
   it('Oracles initialized', async () => {
@@ -102,7 +99,12 @@ describe('fruitbasket', () => {
   let frt_bsk_cache = null;
   it('Group initialized', async () => {
     await provider.connection.confirmTransaction(
-      await provider.connection.requestAirdrop(owner.publicKey, 10000000000),
+      await provider.connection.requestAirdrop(owner.publicKey, 100000000000),
+      "confirmed"
+    );
+
+    await provider.connection.confirmTransaction(
+      await provider.connection.requestAirdrop(wallet.publicKey, 100000000000),
       "confirmed"
     );
 
@@ -130,22 +132,35 @@ describe('fruitbasket', () => {
     );
   });
 
+  let open_orders_by_token : web3.Keypair[];
   it( "Tokens added ", async() => {
+    let token_list = await Promise.all(tokens);
+    const openOrdersSpace = OpenOrders.getLayout(serum.DEX_ID,).span;
+    const open_orders_by_token = await Promise.all( token_list.map(async(x) => test_utils.createAccount(owner, serum.DEX_ID, openOrdersSpace) ) );
     
-    let token_pools = await Promise.all(tokens.map( async(x) => await (await x).createAccount(owner.publicKey)));
-
+    let token_pools = await Promise.all(token_list.map( async(x) => x.createAccount(owner.publicKey)));
+    let markets = await markets_by_tokens;
     for(let index = 0; index < nb_tokens; ++index){
+      let market : web3.PublicKey = (index == 0 ? web3.PublicKey.default : markets[index-1].publicKey);
+      let open_orders = open_orders_by_token[index].publicKey;
+      //if(index > 0) {signers.push(open_orders_by_token[index-1])}
+      //else {signers.push(tmp_usdc_oo)}
+
       await program.rpc.addToken(
         token_names[index],
         {
           accounts : {
-            owner: owner.publicKey,
+            owner : owner.publicKey,
             fruitBasketGrp: frt_bsk_group,
-            mint : (await tokens[index]).publicKey,
+            mint : token_list[index].publicKey,
             priceOracle : (await price_oracles[index]).publicKey,
             productOracle : (await produce_oracles[index]).publicKey,
             tokenPool: token_pools[index],
+            market: market,
+            openOrdersAccount : open_orders,
             tokenProgram : TOKEN_PROGRAM_ID,
+            dexProgram : serum.DEX_ID,
+            rent : web3.SYSVAR_RENT_PUBKEY,
           },
           signers : [owner],
         }
@@ -156,6 +171,9 @@ describe('fruitbasket', () => {
   let basket_1 : web3.PublicKey;
   let basket_2 : web3.PublicKey;
   let basket_3 : web3.PublicKey;
+  let basket_1_mint :  web3.PublicKey;
+  let basket_2_mint :  web3.PublicKey;
+  let basket_3_mint :  web3.PublicKey;
 
   it( "Baskets created ", async() => {
     const exp = 1000000;
@@ -197,9 +215,10 @@ describe('fruitbasket', () => {
     // first basket
     let basket_nb = 0;
     const [_basket_1, bump_b1] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
-    const [basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
+    const [_basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
     const components_1 = [comp_btc, comp_eth, comp_sol];
     basket_1 = _basket_1;
+    basket_1_mint = _basket_1_mint;
 
     await program.rpc.addBasket(
       basket_nb,
@@ -225,9 +244,10 @@ describe('fruitbasket', () => {
     // second basket
     ++basket_nb;
     const [_basket_2, bump_b2] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
-    const [basket_2_mint, bump_b2m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
+    const [_basket_2_mint, bump_b2m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
     const components_2 = [comp_sol, comp_srm, comp_mngo];
     basket_2 = _basket_2;
+    basket_2_mint = _basket_2_mint;
 
     await program.rpc.addBasket(
       basket_nb,
@@ -253,9 +273,10 @@ describe('fruitbasket', () => {
     // third basket
     ++basket_nb;
     const [_basket_3, bump_b3] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
-    const [basket_3_mint, bump_b3m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
+    const [_basket_3_mint, bump_b3m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
     const components_3 = [comp_sh1, comp_sh2];
     basket_3 = _basket_3;
+    basket_3_mint = _basket_3_mint;
 
     await program.rpc.addBasket(
       basket_nb,
@@ -351,22 +372,31 @@ describe('fruitbasket', () => {
     assert.ok(basket_3_info.confidence.toNumber() > 0);
 
   });
-
-  it( "Market intialized", async() => {
-    let t = await Promise.all(tokens);
-    let other_tokens = t.slice(1);
-    let quote_token = t[0];
-    let markets_by_tokens = await Promise.all(
-      Array.from(Array(other_tokens.length).keys()).map(x => {
-         const marketPrice = Number(token_prices[x]) * (10 ** token_exp[x]);
-        return serum_utils.createAndMakeMarket(other_tokens[x], quote_token, marketPrice);
-      })
-    );
+  
+  it( "Buy Basket", async() => {
+    let markets = await markets_by_tokens;
+    let token_list = await Promise.all(tokens);
+    let usdc = token_list[0];
+    token_list = token_list.splice(1);
+    let info = CreateMarketInfo(markets, token_list);
   } );
 
   function ComponentInfo() {
     this.tokenIndex;
     this.amount;
     this.decimal;
+  }
+
+  function CreateMarketInfo(markets : Market[], tokens : TestToken[]) {
+    let info = [];
+    assert.ok(tokens.length== markets.length);
+    for (let index = 0; index < markets.length; ++index) {
+      const token = tokens[index];
+      const market = markets[index];
+      info.push({ isSigner: false, isWritable: false, pubkey: token.publicKey });
+      info.push({ isSigner: false, isWritable: true, pubkey: market.publicKey });
+      info.push({ isSigner: false, isWritable: true, pubkey: market.re });
+    }
+    return info;
   }
 });
