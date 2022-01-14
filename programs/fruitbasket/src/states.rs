@@ -43,6 +43,7 @@ pub struct TokenDescription
     pub product_oracle: Pubkey, // product info keys
     pub token_name: [u8; 10],      // token names
     pub token_pool : Pubkey, // pool for each token 
+    pub token_decimal : u8,     // number of decimal places for token (1 SOL -> 10^9 lamports = 9 decimal places )
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Copy)]

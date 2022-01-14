@@ -33,12 +33,12 @@ pub struct AddToken<'info>{
     #[account(mut)]
     pub fruit_basket_grp : AccountLoader<'info, FruitBasketGroup>,
 
-    pub mint : AccountInfo<'info>,
+    pub mint : Account<'info, Mint>,
     pub price_oracle : AccountInfo<'info>,
     pub product_oracle : AccountInfo<'info>,
     #[account(mut, 
               constraint = token_pool.owner == *owner.key,
-              constraint = token_pool.mint == *mint.key)]
+              constraint = token_pool.mint == *mint.to_account_info().key)]
     pub token_pool : Account<'info, TokenAccount>,
     pub token_program : Program<'info, anchor_spl::token::Token>,
 }
@@ -117,9 +117,11 @@ pub struct BuyBasket<'info> {
               constraint = fruit_basket_account.mint == *fruit_basket_mint.to_account_info().key)]
     pub fruit_basket_account : Account<'info, TokenAccount>,
 
+    pub authority : AccountInfo<'info>,
+
     // Programs.
     pub dex_program: AccountInfo<'info>,
     pub token_program: AccountInfo<'info>,
     // Sysvars.
-    pub rent: Sysvar<'info, Rent>,
+    pub rent: AccountInfo<'info>,
 }

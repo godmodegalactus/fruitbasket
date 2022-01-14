@@ -1,4 +1,9 @@
+use fixed::traits::Fixed;
+
 use crate::*;
+use anchor_spl::dex::serum_dex::matching::{OrderType, Side};
+use std::num::NonZeroU64;
+use anchor_spl::dex::serum_dex::instruction::SelfTradeBehavior;
 
 pub fn initialize_group(
     ctx: Context<InitializeGroup>,
@@ -33,7 +38,7 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
     let mut group = ctx.accounts.fruit_basket_grp.load_mut()?;
     let current: usize = group.token_count as usize;
     assert!(current < MAX_NB_TOKENS);
-    group.token_description[current].token_mint = *ctx.accounts.mint.key;
+    group.token_description[current].token_mint = *ctx.accounts.mint.to_account_info().key;
     group.token_description[current].price_oracle = *ctx.accounts.price_oracle.key;
     group.token_description[current].product_oracle = *ctx.accounts.product_oracle.key;
     group.token_description[current].token_name[..name.len()].clone_from_slice(name[..].as_bytes());
@@ -50,7 +55,7 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
         token::set_authority(cpi, AuthorityType::AccountOwner, Some(authority))?;
     }
     group.token_description[current].token_pool = *ctx.accounts.token_pool.to_account_info().key;
-
+    group.token_description[current].token_decimal = ctx.accounts.mint.decimals;
     group.token_count += 1;
     //group.token
     Ok(())
@@ -135,7 +140,7 @@ pub fn buy_basket<'info>(
 ) -> ProgramResult {
 
     let markets: &mut Vec<MarketAccounts> = &mut Vec::new();
-    for i in 0..number_of_markets {
+    for _i in 0..number_of_markets {
         markets.push(
             MarketAccounts {
                 base_token_mint : ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
@@ -152,12 +157,24 @@ pub fn buy_basket<'info>(
             }
         );
     }
+    let (pda, bump) =
+        Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
+    assert_eq!(*ctx.accounts.authority.key, pda);
+
+    let seeds = &[&FRUIT_BASKET_AUTHORITY[..], &[bump]];
+    // temporarily change authority to program authority to enable swap
+    change_authority(&ctx.accounts.paying_account.to_account_info(), 
+                    &ctx.accounts.user, 
+                    &ctx.accounts.authority, 
+                    &ctx.accounts.token_program, 
+                    None)?;
+    
     let group = &ctx.accounts.group.load()?;
     let basket = &ctx.accounts.basket;
     let value_before_buying = token::accessor::amount(&ctx.accounts.paying_token_mint.to_account_info())?;
     // swap coins one by one
     for component_index in 0..basket.number_of_components {
-        let component = &basket.components[component_index as usize];
+        let component : &BasketComponentDescription = &basket.components[component_index as usize];
         let token = &group.token_description[component.token_index as usize];
         let position = markets.iter().position( |x| *x.base_token_mint.key == token.token_mint);
         
@@ -168,23 +185,102 @@ pub fn buy_basket<'info>(
 
         let market = &markets[position.unwrap()];
         assert_eq!(*market.token_pool.key, token.token_pool);
+
+        // calculate amount of tokens to transfer
+        let amount_of_tokens = (amount as u128)
+                                            .checked_mul(component.amount.into()).unwrap()
+                                            .checked_div(10u128.pow(exp.into())).unwrap()
+                                            .checked_mul(10u128.pow(token.token_decimal.into())).unwrap()
+                                            .checked_div(10u128.pow(component.decimal.into())).unwrap();
+
         // swap usdc to coin
-        let settle_accs = dex::SettleFunds {
-            market: market.market.clone(),
-            open_orders: market.open_orders.clone(),
-            open_orders_authority: ctx.accounts.user.clone(),
-            coin_vault: market.token_vault.clone(),
-            pc_vault: market.quote_token_vault.clone(),
-            coin_wallet: market.token_pool.clone(),
-            pc_wallet: ctx.accounts.paying_account.to_account_info().clone(),
-            vault_signer: market.vault_signer.clone(),
-            token_program: ctx.accounts.token_program.clone(),
-        };
-        let mut ctx = CpiContext::new(ctx.accounts.dex_program.clone(), settle_accs);
-        dex::settle_funds(ctx)?;
+        order(&ctx, market, u64::MAX, amount_of_tokens as u64, u64::MAX, Side::Ask)?;
+        settle_funds(&ctx, market)?;
     }
     let value_after_buying = token::accessor::amount(&ctx.accounts.paying_account.to_account_info())?;
     assert!(value_before_buying - value_after_buying < maximum_allowed_price);
 
+    // change authority back
+    change_authority(&ctx.accounts.paying_account.to_account_info(), 
+                    &ctx.accounts.authority, 
+                    &ctx.accounts.user, 
+                    &ctx.accounts.token_program, 
+                    Some(&[seeds]))?;
+    // TODO mint basket tokens to the user
     Ok(())
+}
+
+fn order<'info>( ctx: &Context<'_, '_, '_, 'info, BuyBasket<'info>>,
+    market : &MarketAccounts<'info>,
+    limit_price: u64,
+    max_coin_qty: u64,
+    max_native_pc_qty: u64,
+    side: Side,
+) -> ProgramResult {
+    // Client order id is only used for cancels. Not used here so hardcode.
+    let client_order_id = 0;
+    let limit = 65535;
+
+    let new_orders = dex::NewOrderV3 {
+        market: market.market.clone(),
+        open_orders: market.open_orders.clone(),
+        request_queue: market.request_queue.clone(),
+        event_queue: market.event_queue.clone(),
+        market_bids: market.bids.clone(),
+        market_asks: market.asks.clone(),
+        order_payer_token_account: market.token_pool.clone(),
+        open_orders_authority: ctx.accounts.authority.clone(),
+        coin_vault: market.token_vault.clone(),
+        pc_vault: market.quote_token_vault.clone(),
+        token_program: ctx.accounts.token_program.clone(),
+        rent: ctx.accounts.rent.clone(),
+    };
+
+    let ctx_orders = CpiContext::new(ctx.accounts.dex_program.clone(), new_orders);
+
+    dex::new_order_v3(
+        ctx_orders,
+        side,
+        NonZeroU64::new(limit_price).unwrap(),
+        NonZeroU64::new(max_coin_qty).unwrap(),
+        NonZeroU64::new(max_native_pc_qty).unwrap(),
+        SelfTradeBehavior::DecrementTake,
+        OrderType::ImmediateOrCancel,
+        client_order_id,
+        limit,
+    )
+}
+
+fn settle_funds<'info>( ctx: &Context<'_, '_, '_, 'info, BuyBasket<'info>>,
+                        market : &MarketAccounts<'info> ) -> ProgramResult {
+    let settle_accs = dex::SettleFunds {
+        market: market.market.clone(),
+        open_orders: market.open_orders.clone(),
+        open_orders_authority: ctx.accounts.authority.clone(),
+        coin_vault: market.token_vault.clone(),
+        pc_vault: market.quote_token_vault.clone(),
+        coin_wallet: market.token_pool.clone(),
+        pc_wallet: ctx.accounts.paying_account.to_account_info().clone(),
+        vault_signer: market.vault_signer.clone(),
+        token_program: ctx.accounts.token_program.clone(),
+    };
+    let settle_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), settle_accs);
+    dex::settle_funds(settle_ctx)
+}
+
+fn change_authority<'info>(acc : &AccountInfo<'info>, 
+                          from : &AccountInfo<'info>, 
+                          to: &AccountInfo<'info>, 
+                          token_program: &AccountInfo<'info>, 
+                          seeds : Option<&[&[&[u8]]]>) -> ProgramResult{
+
+    let cpi_acc = SetAuthority {
+        account_or_mint: acc.clone(),
+        current_authority: from.clone(),
+    };
+    let mut cpi = CpiContext::new(token_program.clone(), cpi_acc);
+    if let Some(signer_seeds) = seeds {
+        cpi = cpi.with_signer(signer_seeds);
+    }
+    token::set_authority( cpi,  AuthorityType::AccountOwner, Some(*to.key))
 }
