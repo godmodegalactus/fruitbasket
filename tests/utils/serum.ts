@@ -1,4 +1,4 @@
-import { Market, DexInstructions } from "@project-serum/serum";
+import { Market, DexInstructions, OpenOrders } from "@project-serum/serum";
 import {
     Keypair,
     LAMPORTS_PER_SOL,
@@ -10,16 +10,16 @@ import { BN } from "@project-serum/anchor";
 import { Token, TOKEN_PROGRAM_ID, AccountLayout as TokenAccountLayout } from "@solana/spl-token";
 import { TestUtils, toPublicKeys } from "./test_utils";
 import { TestToken } from "./test_utils";
+import { assert } from "chai";
+import mlog from "mocha-logger";
 
 export const DEX_ID = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
 
 export class SerumUtils {
     private utils: TestUtils;
-    public dex_id: PublicKey;
 
     constructor(utils: TestUtils) {
         this.utils = utils;
-        this.dex_id = DEX_ID;
     }
 
     private async createAccountIx(
@@ -42,11 +42,12 @@ export class SerumUtils {
      * Create a new Serum market
      */
     public async createMarket(info: CreateMarketInfo): Promise<Market> {
-        const market = Keypair.generate();
-        const requestQueue = Keypair.generate();
-        const eventQueue = Keypair.generate();
-        const bids = Keypair.generate();
-        const asks = Keypair.generate();
+        const owner = this.utils.payer();
+        const market = await this.utils.createAccount( owner, DEX_ID, Market.getLayout(DEX_ID).span,);
+        const requestQueue = await this.utils.createAccount( owner, DEX_ID, 5132);
+        const eventQueue = await this.utils.createAccount( owner, DEX_ID, 262156);
+        const bids = await this.utils.createAccount( owner, DEX_ID, 65548);
+        const asks = await this.utils.createAccount( owner, DEX_ID, 65548);
         const quoteDustThreshold = new BN(100);
 
         const [vaultOwner, vaultOwnerBump] = await this.findVaultOwner(
@@ -65,25 +66,9 @@ export class SerumUtils {
                 new BN(0)
                 ),
             ]);
+        
             
         const initMarketTx = this.utils.transaction().add(
-            await this.createAccountIx(
-                market.publicKey,
-                Market.getLayout(this.dex_id).span,
-                this.dex_id
-            ),
-            await this.createAccountIx(
-                requestQueue.publicKey,
-                5132,
-                this.dex_id
-            ),
-            await this.createAccountIx(
-                eventQueue.publicKey,
-                262156,
-                this.dex_id
-            ),
-            await this.createAccountIx(bids.publicKey, 65548, this.dex_id),
-            await this.createAccountIx(asks.publicKey, 65548, this.dex_id),
             DexInstructions.initializeMarket(
                 toPublicKeys({
                     market,
@@ -100,25 +85,38 @@ export class SerumUtils {
                     feeRateBps: info.feeRateBps,
                     vaultSignerNonce: vaultOwnerBump,
                     quoteDustThreshold,
-                    programId: this.dex_id,
+                    programId: DEX_ID,
                 })
             )
         );
 
-        await this.utils.sendAndConfirmTransaction(initMarketTx, [
-            market,
-            requestQueue,
-            eventQueue,
-            bids,
-            asks,
-        ]);
+        await this.utils.sendAndConfirmTransaction(initMarketTx, []);
 
-        return await Market.load(
+        let mkt = await Market.load(
             this.utils.connection(),
             market.publicKey,
-            undefined,
-            this.dex_id
+            { commitment: "recent" },
+            DEX_ID
         );
+        assert.ok( mkt.publicKey.toString() == market.publicKey.toString() );
+
+        // let open_orders = await this.utils.createAccount( owner, DEX_ID, OpenOrders.getLayout(DEX_ID).span);
+        
+        // let init_oo =  this.utils.transaction().add(DexInstructions.initOpenOrders(
+        //     {
+        //         market : market.publicKey,
+        //         openOrders : open_orders.publicKey,
+        //         owner : owner,
+        //         programId : DEX_ID,
+        //         marketAuthority : owner,
+        //     }
+        // ));
+        // await this.utils.sendAndConfirmTransaction(
+        //     init_oo,
+        //     []
+        // );
+        // mlog.log(open_orders.publicKey);
+        return mkt;
     }
 
     public async createMarketMaker(
@@ -148,7 +146,7 @@ export class SerumUtils {
             quoteToken,
             baseLotSize: 100000,
             quoteLotSize: 100,
-            feeRateBps: 22,
+            feeRateBps: 0,
         });
         const marketMaker = await this.createMarketMaker(
             1 * LAMPORTS_PER_SOL,
@@ -172,7 +170,7 @@ export class SerumUtils {
             try {
                 const vaultOwner = await PublicKey.createProgramAddress(
                     [market.toBuffer(), bump.toArrayLike(Buffer, "le", 8)],
-                    this.dex_id
+                    DEX_ID
                 );
     
                 return [vaultOwner, bump];

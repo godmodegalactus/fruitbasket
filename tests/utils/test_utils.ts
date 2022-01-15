@@ -18,6 +18,7 @@ import {
     TransactionInstruction,
 } from "@solana/web3.js";
 import { Pyth } from "./pyth";
+import mlog from "mocha-logger";
 
 export class TestUtils {
     public static readonly pythProgramId = Pyth.programId;
@@ -37,13 +38,13 @@ export class TestUtils {
         this.pyth = new Pyth(conn, funded);
     }
 
-    async createAccount( owner : Keypair, programId : PublicKey, space: number): Promise<Account> {
-        const newAccount = new Account();
+    async createAccount( owner : Keypair, pid : PublicKey, space: number): Promise<Keypair> {
+        const newAccount = new Keypair();
         const createTx = new Transaction().add(
             SystemProgram.createAccount({
                 fromPubkey: owner.publicKey,
                 newAccountPubkey: newAccount.publicKey,
-                programId: programId,
+                programId: pid,
                 lamports: await this.conn.getMinimumBalanceForRentExemption(
                     space
                 ),

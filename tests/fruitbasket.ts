@@ -9,7 +9,7 @@ import {
   u64,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
-import { Market, OpenOrders } from "@project-serum/serum";
+import { Market, OpenOrders, DexInstructions } from "@project-serum/serum";
 
 import * as pyth from './utils/pyth'
 import * as serum from './utils/serum'
@@ -39,7 +39,6 @@ describe('fruitbasket', () => {
   const programId = program.programId;
 
   // create some tokens
-  const nb_tokens = 8;
   const usdc = test_utils.createToken(6, wallet.publicKey);
   const btc = test_utils.createToken(6, wallet.publicKey);
   const eth = test_utils.createToken(6, wallet.publicKey);
@@ -49,20 +48,24 @@ describe('fruitbasket', () => {
   const shit1 = test_utils.createToken(6, wallet.publicKey);
   const shit2 = test_utils.createToken(6, wallet.publicKey);
 
-  let tokens = [usdc, btc, eth, sol, srm, mngo, shit1, shit2];
-  let token_names = ["USDC", "BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
-  let token_prices = [1000n, 40000000n, 4000000n, 200000000n, 4000000n, 140000n, 145000n, 5000n];
-  let token_exp = [-3, -3, -3, -6, -6, -6, -6, -6];
+  let quote_token = usdc;
+  let tokens = [btc, eth, sol, srm, mngo, shit1, shit2];
+  const nb_tokens = tokens.length;
+  let token_names = ["BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
+  let token_prices = [40000000n, 4000000n, 200000000n, 4000000n, 140000n, 145000n, 5000n];
+  let token_exp = [-3, -3, -6, -6, -6, -6, -6];
+  assert.ok(tokens.length == token_names.length);
+  assert.ok(tokens.length == token_prices.length)
+  assert.ok(tokens.length == token_exp.length);
 
   let markets_by_tokens: Promise<Market[]> = null;
   it( "Market intialized", async() => {
     let t = await Promise.all(tokens);
-    let other_tokens = t.slice(1);
-    let quote_token = t[0];
+    let usdc = (await quote_token);
     markets_by_tokens = Promise.all(
-      Array.from(Array(other_tokens.length).keys()).map(x => {
+      Array.from(Array(t.length).keys()).map(x => {
          const marketPrice = Number(token_prices[x]) * (10 ** token_exp[x]);
-        return serum_utils.createAndMakeMarket(other_tokens[x], quote_token, marketPrice);
+        return serum_utils.createAndMakeMarket(t[x], usdc, marketPrice);
       })
     );
     // await for all markets to get initialized
@@ -136,16 +139,13 @@ describe('fruitbasket', () => {
   it( "Tokens added ", async() => {
     let token_list = await Promise.all(tokens);
     const openOrdersSpace = OpenOrders.getLayout(serum.DEX_ID,).span;
-    const open_orders_by_token = await Promise.all( token_list.map(async(x) => test_utils.createAccount(owner, serum.DEX_ID, openOrdersSpace) ) );
+    open_orders_by_token = await Promise.all( token_list.map(async(x) => test_utils.createAccount(owner, serum.DEX_ID, openOrdersSpace) ) );
     
     let token_pools = await Promise.all(token_list.map( async(x) => x.createAccount(owner.publicKey)));
     let markets = await markets_by_tokens;
     for(let index = 0; index < nb_tokens; ++index){
-      let market : web3.PublicKey = (index == 0 ? web3.PublicKey.default : markets[index-1].publicKey);
-      let open_orders = open_orders_by_token[index].publicKey;
-      //if(index > 0) {signers.push(open_orders_by_token[index-1])}
-      //else {signers.push(tmp_usdc_oo)}
-
+      let marketKey = markets[index].publicKey;
+      let open_orders = open_orders_by_token[index];
       await program.rpc.addToken(
         token_names[index],
         {
@@ -156,8 +156,8 @@ describe('fruitbasket', () => {
             priceOracle : (await price_oracles[index]).publicKey,
             productOracle : (await produce_oracles[index]).publicKey,
             tokenPool: token_pools[index],
-            market: market,
-            openOrdersAccount : open_orders,
+            market: marketKey,
+            openOrdersAccount : open_orders.publicKey,
             tokenProgram : TOKEN_PROGRAM_ID,
             dexProgram : serum.DEX_ID,
             rent : web3.SYSVAR_RENT_PUBKEY,
@@ -178,37 +178,37 @@ describe('fruitbasket', () => {
   it( "Baskets created ", async() => {
     const exp = 1000000;
     let comp_btc = new ComponentInfo();
-    comp_btc.tokenIndex = 1;
+    comp_btc.tokenIndex = 0;
     comp_btc.amount = new anchor.BN(exp * 0.01); // 0.01 BTC
     comp_btc.decimal = 6;
 
     let comp_eth = new ComponentInfo();
-    comp_eth.tokenIndex = 2;
+    comp_eth.tokenIndex = 1;
     comp_eth.amount = new anchor.BN(exp * 0.1); // 0.1 ETC
     comp_eth.decimal = 6;
 
     let comp_sol = new ComponentInfo();
-    comp_sol.tokenIndex = 3;
+    comp_sol.tokenIndex = 2;
     comp_sol.amount = new anchor.BN(2 * web3.LAMPORTS_PER_SOL); // 2 SOL
     comp_sol.decimal = 9;
 
     let comp_srm = new ComponentInfo();
-    comp_srm.tokenIndex = 4;
+    comp_srm.tokenIndex = 3;
     comp_srm.amount = new anchor.BN(exp * 100); // 100 SRM
     comp_srm.decimal = 6;
 
     let comp_mngo = new ComponentInfo();
-    comp_mngo.tokenIndex = 5;
+    comp_mngo.tokenIndex = 4;
     comp_mngo.amount = new anchor.BN(exp * 1000); // 1000 MNGO
     comp_mngo.decimal = 6;
 
     let comp_sh1 = new ComponentInfo();
-    comp_sh1.tokenIndex = 6;
+    comp_sh1.tokenIndex = 5;
     comp_sh1.amount = new anchor.BN(exp * 10000); // 10000 SHIT1
     comp_sh1.decimal = 6;
 
     let comp_sh2 = new ComponentInfo();
-    comp_sh2.tokenIndex = 7;
+    comp_sh2.tokenIndex = 6;
     comp_sh2.amount = new anchor.BN(exp * 100000); // 100000 SHIT1
     comp_sh2.decimal = 6;
 
@@ -306,7 +306,7 @@ describe('fruitbasket', () => {
     assert.ok(group_info.baseMint.equals((await usdc).publicKey));
     assert.ok(group_info.nbUsers == 0);
     assert.ok(group_info.numberOfBaskets == 3);
-    assert.ok(group_info.tokenCount == 8);
+    assert.ok(group_info.tokenCount == nb_tokens);
     // for (let token_desc in group_info.tokenDescription){
 
     // }
@@ -376,8 +376,6 @@ describe('fruitbasket', () => {
   it( "Buy Basket", async() => {
     let markets = await markets_by_tokens;
     let token_list = await Promise.all(tokens);
-    let usdc = token_list[0];
-    token_list = token_list.splice(1);
     let info = CreateMarketInfo(markets, token_list);
   } );
 

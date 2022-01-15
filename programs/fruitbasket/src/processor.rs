@@ -56,7 +56,7 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
     }
     group.token_description[current].token_pool = *ctx.accounts.token_pool.to_account_info().key;
     group.token_description[current].token_decimal = ctx.accounts.mint.decimals;
-
+    
     group.token_count += 1;
     if ctx.accounts.market.key() == empty::ID {
         return Ok(());
@@ -69,6 +69,7 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
         rent: ctx.accounts.rent.clone(),
     };
     let oo_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), open_order_instruction);
+    dex::init_open_orders(oo_ctx)?;
     //group.token
     Ok(())
 }
