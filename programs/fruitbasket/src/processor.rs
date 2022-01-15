@@ -42,8 +42,10 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
     group.token_description[current].price_oracle = *ctx.accounts.price_oracle.key;
     group.token_description[current].product_oracle = *ctx.accounts.product_oracle.key;
     group.token_description[current].token_name[..name.len()].clone_from_slice(name[..].as_bytes());
-    let (authority, _bump) =
+    let (authority, bump) =
         Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
+
+    assert_eq!(authority, ctx.accounts.fruitbasket_authority.key());
     {
         // change authority of token pool to authority
         let cpi_accounts = SetAuthority {
@@ -61,15 +63,16 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
     if ctx.accounts.market.key() == empty::ID {
         return Ok(());
     }
+    let seeds = &[&FRUIT_BASKET_AUTHORITY[..], &[bump]];
     //create and assign open order
     let open_order_instruction = dex::InitOpenOrders {
         open_orders: ctx.accounts.open_orders_account.to_account_info().clone(),
-        authority: ctx.accounts.owner.clone(),
+        authority: ctx.accounts.fruitbasket_authority.clone(),
         market: ctx.accounts.market.clone(),
         rent: ctx.accounts.rent.clone(),
     };
     let oo_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), open_order_instruction);
-    dex::init_open_orders(oo_ctx)?;
+    dex::init_open_orders(oo_ctx.with_signer(&[seeds]))?;
     //group.token
     Ok(())
 }

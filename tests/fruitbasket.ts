@@ -135,8 +135,11 @@ describe('fruitbasket', () => {
     );
   });
 
+  let fruitbasket_authority : web3.PublicKey;
+  let fb_auth_bump : number;
   let open_orders_by_token : web3.Keypair[];
   it( "Tokens added ", async() => {
+    [fruitbasket_authority, fb_auth_bump] = await web3.PublicKey.findProgramAddress([Buffer.from("fruitbasket_auth")], programId);
     let token_list = await Promise.all(tokens);
     const openOrdersSpace = OpenOrders.getLayout(serum.DEX_ID,).span;
     open_orders_by_token = await Promise.all( token_list.map(async(x) => test_utils.createAccount(owner, serum.DEX_ID, openOrdersSpace) ) );
@@ -145,7 +148,7 @@ describe('fruitbasket', () => {
     let markets = await markets_by_tokens;
     for(let index = 0; index < nb_tokens; ++index){
       let marketKey = markets[index].publicKey;
-      let open_orders = open_orders_by_token[index];
+      let open_orders = open_orders_by_token[index]; 
       await program.rpc.addToken(
         token_names[index],
         {
@@ -158,6 +161,7 @@ describe('fruitbasket', () => {
             tokenPool: token_pools[index],
             market: marketKey,
             openOrdersAccount : open_orders.publicKey,
+            fruitbasketAuthority: fruitbasket_authority,
             tokenProgram : TOKEN_PROGRAM_ID,
             dexProgram : serum.DEX_ID,
             rent : web3.SYSVAR_RENT_PUBKEY,

@@ -44,7 +44,7 @@ pub struct AddToken<'info>{
     pub market : AccountInfo<'info>,
     #[account(mut)]
     pub open_orders_account : AccountInfo<'info>,
-
+    pub fruitbasket_authority : AccountInfo<'info>,
     pub token_program : AccountInfo<'info>,
     pub dex_program : AccountInfo<'info>,
     pub rent : AccountInfo<'info>,
