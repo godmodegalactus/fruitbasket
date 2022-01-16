@@ -154,7 +154,7 @@ pub fn buy_basket<'info>(
     number_of_markets : u64,
     maximum_allowed_price : u64,
 ) -> ProgramResult {
-
+    msg!("procssing buy basket");
     let markets: &mut Vec<MarketAccounts> = &mut Vec::new();
     for _i in 0..number_of_markets {
         markets.push(
@@ -173,6 +173,7 @@ pub fn buy_basket<'info>(
             }
         );
     }
+    msg!("deserialized market data");
     let (pda, bump) =
         Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
     assert_eq!(*ctx.accounts.authority.key, pda);
@@ -184,7 +185,7 @@ pub fn buy_basket<'info>(
                     ctx.accounts.authority.key(), 
                     &ctx.accounts.token_program, 
                     None)?;
-    
+    msg!("auth changed data");
     let group = &ctx.accounts.group.load()?;
     let basket = &ctx.accounts.basket;
     let value_before_buying = token::accessor::amount(&ctx.accounts.paying_token_mint.to_account_info())?;
@@ -215,7 +216,7 @@ pub fn buy_basket<'info>(
     }
     let value_after_buying = token::accessor::amount(&ctx.accounts.paying_account.to_account_info())?;
     assert!(value_before_buying - value_after_buying < maximum_allowed_price);
-
+    msg!("tokens");
     // change authority back
     change_authority(&ctx.accounts.paying_account.to_account_info(), 
                     &ctx.accounts.authority, 

@@ -63,7 +63,7 @@ pub struct AddBasket<'info> {
                bump = basket_bump,
                payer = client,
                space = 8 + size_of::<Basket>())]
-    pub basket : Account<'info, Basket>,
+    pub basket : Box<Account<'info, Basket>>,
 
     #[account(init,
               seeds = [FRUIT_BASKET_MINT, &[basket_number]],
@@ -89,7 +89,7 @@ pub struct UpdatePrice<'info> {
 #[derive(Accounts)]
 pub struct UpdateBasketPrice<'info> {
     #[account(mut)]
-    pub basket : Account<'info, Basket>,
+    pub basket : Box<Account<'info, Basket>>,
 
     pub cache : AccountLoader<'info, Cache>,
 }
@@ -101,7 +101,7 @@ pub struct BuyBasket<'info> {
     #[account(signer)]
     pub user : AccountInfo<'info>,
 
-    pub basket : Account<'info, Basket>,
+    pub basket : Box<Account<'info, Basket>>,
 
     #[account(mut,
                 constraint = paying_account.owner == *user.key,
@@ -119,11 +119,7 @@ pub struct BuyBasket<'info> {
     #[account(mut,
                 constraint = *fruit_basket_mint.to_account_info().key == basket.basket_mint )]
     pub fruit_basket_mint: Account<'info, Mint>,
-
-    #[account(mut,
-              constraint = fruit_basket_account.mint == *fruit_basket_mint.to_account_info().key)]
-    pub fruit_basket_account : Account<'info, TokenAccount>,
-
+    
     pub authority : AccountInfo<'info>,
 
     // Programs.

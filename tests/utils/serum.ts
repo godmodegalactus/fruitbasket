@@ -99,23 +99,6 @@ export class SerumUtils {
             DEX_ID
         );
         assert.ok( mkt.publicKey.toString() == market.publicKey.toString() );
-
-        // let open_orders = await this.utils.createAccount( owner, DEX_ID, OpenOrders.getLayout(DEX_ID).span);
-        
-        // let init_oo =  this.utils.transaction().add(DexInstructions.initOpenOrders(
-        //     {
-        //         market : market.publicKey,
-        //         openOrders : open_orders.publicKey,
-        //         owner : owner,
-        //         programId : DEX_ID,
-        //         marketAuthority : owner,
-        //     }
-        // ));
-        // await this.utils.sendAndConfirmTransaction(
-        //     init_oo,
-        //     []
-        // );
-        // mlog.log(open_orders.publicKey);
         return mkt;
     }
 
@@ -163,7 +146,7 @@ export class SerumUtils {
         return market;
     }
 
-    async findVaultOwner(market: PublicKey): Promise<[PublicKey, BN]> {
+    public async findVaultOwner(market: PublicKey): Promise<[PublicKey, BN]> {
         const bump = new BN(0);
     
         while (bump.toNumber() < 255) {

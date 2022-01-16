@@ -97,14 +97,14 @@ impl Basket {
 
 pub struct MarketAccounts<'info> {
     pub base_token_mint : AccountInfo<'info>,
-    pub market: AccountInfo<'info>,
-    pub open_orders: AccountInfo<'info>,
-    pub request_queue: AccountInfo<'info>,
-    pub event_queue: AccountInfo<'info>,
-    pub bids: AccountInfo<'info>,
-    pub asks: AccountInfo<'info>,
-    pub token_vault: AccountInfo<'info>,
-    pub quote_token_vault: AccountInfo<'info>,
+    pub market: AccountInfo<'info>,             //mutable
+    pub open_orders: AccountInfo<'info>,        //mutable
+    pub request_queue: AccountInfo<'info>,      //mutable
+    pub event_queue: AccountInfo<'info>,        //mutable
+    pub bids: AccountInfo<'info>,               //mutable
+    pub asks: AccountInfo<'info>,               //mutable
+    pub token_vault: AccountInfo<'info>,        //mutable
+    pub quote_token_vault: AccountInfo<'info>,  //mutable
     pub vault_signer: AccountInfo<'info>,
-    pub token_pool : AccountInfo<'info>,
+    pub token_pool : AccountInfo<'info>,        //mutable
 }
