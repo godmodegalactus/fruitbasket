@@ -2,6 +2,14 @@ use anchor_spl::token::Token;
 use anchor_spl::dex::serum_dex::state::OpenOrders;
 use crate::*;
 
+const FRUIT_BASKET_GROUP : &[u8] = b"fruitbasket_group";
+const FRUIT_BASKET_CACHE : &[u8] = b"fruitbasket_cache";
+const FRUIT_BASKET_AUTHORITY : &[u8] = b"fruitbasket_auth";
+const FRUIT_BASKET : &[u8] = b"fruitbasket";
+const FRUIT_BASKET_MINT : &[u8] = b"fruitbasket_mint";
+const FRUIT_BASKET_CONTEXT : &[u8] = b"fruitbasket_context";
+
+
 #[derive(Accounts)]
 #[instruction(bump_group: u8, bump_cache: u8)]
 pub struct InitializeGroup<'info> {
@@ -22,7 +30,14 @@ pub struct InitializeGroup<'info> {
         space = 8 + size_of::<Cache>() )]
     pub cache : AccountLoader<'info, Cache>,
 
+    pub quote_token_mint : Box<Account<'info, Mint>>,
+    
+    #[account(mut,
+              constraint = quote_token_transaction_pool.mint == quote_token_mint.key())]
+    pub quote_token_transaction_pool : Box<Account<'info, TokenAccount>>,
+
     pub system_program : Program<'info, System>,
+    pub token_program : AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -95,13 +110,16 @@ pub struct UpdateBasketPrice<'info> {
 }
 
 #[derive(Accounts)]
-pub struct BuyBasket<'info> {
+#[instruction( order_id: u8, context_bump : u8 )]
+pub struct InitBuyBasket<'info> {
     pub group : AccountLoader<'info, FruitBasketGroup>,
 
-    #[account(signer)]
+    #[account(signer, mut)]
     pub user : AccountInfo<'info>,
 
     pub basket : Box<Account<'info, Basket>>,
+    
+    pub cache : AccountLoader<'info, Cache>,
 
     #[account(mut,
                 constraint = paying_account.owner == *user.key,
@@ -115,16 +133,30 @@ pub struct BuyBasket<'info> {
 
     // USDC mint i.e which token is used to pay for the basket
     pub paying_token_mint : Account<'info, Mint>,
-    // Basket tokens
-    #[account(mut,
-                constraint = *fruit_basket_mint.to_account_info().key == basket.basket_mint )]
-    pub fruit_basket_mint: Account<'info, Mint>,
     
-    pub authority : AccountInfo<'info>,
+    #[account(init,
+                seeds = [FRUIT_BASKET_CONTEXT, &user.key.to_bytes(), &[order_id]],
+                bump = context_bump,
+                payer = user,
+                space = 8 + size_of::<BasketTradeContext>(),
+            )]
+    pub buy_context : AccountLoader<'info, BasketTradeContext>,
 
-    // Programs.
-    pub dex_program: AccountInfo<'info>,
-    pub token_program: AccountInfo<'info>,
-    // Sysvars.
-    pub rent: AccountInfo<'info>,
+    #[account(mut)]
+    pub quote_token_transaction_pool : Box<Account<'info, TokenAccount>>,
+
+    pub token_program : AccountInfo<'info>,
+    pub system_program : Program<'info, System>,
+    // // Basket tokens
+    // #[account(mut,
+    //             constraint = *fruit_basket_mint.to_account_info().key == basket.basket_mint )]
+    // pub fruit_basket_mint: Account<'info, Mint>,
+    
+    // pub authority : AccountInfo<'info>,
+
+    // // Programs.
+    // pub dex_program: AccountInfo<'info>,
+    // pub token_program: AccountInfo<'info>,
+    // // Sysvars.
+    // pub rent: AccountInfo<'info>,
 }

@@ -15,12 +15,6 @@ mod processor;
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 const MAX_NB_TOKENS : usize = 20;
 const MAX_NB_COMPONENTS: usize = 10;
-const FRUIT_BASKET_GROUP : &[u8] = b"fruitbasket_group";
-const FRUIT_BASKET_CACHE : &[u8] = b"fruitbasket_cache";
-const FRUIT_BASKET_AUTHORITY : &[u8] = b"fruitbasket_auth";
-const FRUIT_BASKET : &[u8] = b"fruitbasket";
-const FRUIT_BASKET_MINT : &[u8] = b"fruitbasket_mint";
-
 mod empty {
     use super::*;
     declare_id!("HJt8Tjdsc9ms9i4WCZEzhzr4oyf3ANcdzXrNdLPFqm3M");
@@ -33,9 +27,8 @@ pub mod fruitbasket {
     pub fn initialize_group(ctx: Context<InitializeGroup>, 
             _bump_group: u8, 
             _bump_cache: u8,
-            base_mint: Pubkey,
             base_mint_name: String) -> ProgramResult {
-        processor::initialize_group(ctx, base_mint, base_mint_name)
+        processor::initialize_group(ctx, base_mint_name)
     }
 
     pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
@@ -61,13 +54,13 @@ pub mod fruitbasket {
         processor::update_basket_price(ctx)
     }
 
-    pub fn buy_basket<'info>(
-        ctx: Context<'_, '_, '_, 'info, BuyBasket<'info>>,
+    pub fn init_buy_basket<'info>(
+        ctx: Context<'_, '_, '_, 'info, InitBuyBasket<'info>>,
+        _order_id: u8, 
+        _context_bump : u8, 
         amount : u64,
-        exp : u8,
-        number_of_markets : u64,
         maximum_allowed_price : u64,
     ) -> ProgramResult {
-        processor::buy_basket(ctx, amount, exp, number_of_markets, maximum_allowed_price)
+        processor::init_buy_basket(ctx, amount, maximum_allowed_price)
     }
 }

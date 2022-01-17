@@ -7,7 +7,6 @@ use anchor_spl::dex::serum_dex::instruction::SelfTradeBehavior;
 
 pub fn initialize_group(
     ctx: Context<InitializeGroup>,
-    base_mint: Pubkey,
     base_mint_name: String,
 ) -> ProgramResult {
     // init cache
@@ -16,7 +15,7 @@ pub fn initialize_group(
     let mut group = ctx.accounts.fruit_basket_grp.load_init()?;
     group.owner = *ctx.accounts.owner.key;
     group.token_count = 0;
-    group.base_mint = base_mint;
+    group.base_mint = ctx.accounts.quote_token_mint.key();
     let size: usize = if base_mint_name.len() > 10 {
         10
     } else {
@@ -26,10 +25,20 @@ pub fn initialize_group(
     group.base_mint_name[..size].clone_from_slice(mint_name);
     group.number_of_baskets = 0;
     group.nb_users = 0;
+    group.quote_token_transaction_pool = ctx.accounts.quote_token_transaction_pool.key();
 
     //pre allocate programming addresses
     Pubkey::find_program_address(&[FRUIT_BASKET.as_ref(), &[0]], ctx.program_id);
     Pubkey::find_program_address(&[FRUIT_BASKET_MINT.as_ref(), &[0]], ctx.program_id);
+
+    let (authority, _bump) =
+        Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
+
+    // change authority of the pool fruitbasket authority
+    change_authority(&ctx.accounts.quote_token_transaction_pool.to_account_info(), 
+                    &ctx.accounts.owner, 
+                    authority, &ctx.accounts.token_program, 
+                    None)?;
     Ok(())
 }
 
@@ -73,6 +82,8 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
     };
     let oo_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), open_order_instruction);
     dex::init_open_orders(oo_ctx.with_signer(&[seeds]))?;
+
+    group.token_description[current].token_open_orders = ctx.accounts.open_orders_account.key();
     //group.token
     Ok(())
 }
@@ -147,92 +158,71 @@ pub fn update_basket_price(ctx : Context<UpdateBasketPrice>) -> ProgramResult{
 }
 
 
-pub fn buy_basket<'info>(
-    ctx: Context<'_, '_, '_, 'info, BuyBasket<'info>>,
+pub fn init_buy_basket<'info>(
+    ctx: Context<'_, '_, '_, 'info, InitBuyBasket<'info>>,
     amount : u64,
-    exp : u8,
-    number_of_markets : u64,
     maximum_allowed_price : u64,
 ) -> ProgramResult {
-    msg!("procssing buy basket");
-    let markets: &mut Vec<MarketAccounts> = &mut Vec::new();
-    for _i in 0..number_of_markets {
-        markets.push(
-            MarketAccounts {
-                base_token_mint : ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                market: ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                open_orders: ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                request_queue: ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                event_queue: ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                bids: ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                asks: ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                token_vault: ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                quote_token_vault: ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                vault_signer: ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-                token_pool : ctx.remaining_accounts.iter().next().map(Clone::clone).unwrap(),
-            }
-        );
-    }
-    msg!("deserialized market data");
-    let (pda, bump) =
-        Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
-    assert_eq!(*ctx.accounts.authority.key, pda);
-
-    let seeds = &[&FRUIT_BASKET_AUTHORITY[..], &[bump]];
-    // temporarily change authority to program authority to enable swap
-    change_authority(&ctx.accounts.paying_account.to_account_info(), 
-                    &ctx.accounts.user, 
-                    ctx.accounts.authority.key(), 
-                    &ctx.accounts.token_program, 
-                    None)?;
-    msg!("auth changed data");
-    let group = &ctx.accounts.group.load()?;
+    
+    let group = ctx.accounts.group.load()?;
     let basket = &ctx.accounts.basket;
-    let value_before_buying = token::accessor::amount(&ctx.accounts.paying_token_mint.to_account_info())?;
-    // swap coins one by one
+    let mut buy_context = ctx.accounts.buy_context.load_init()?;
+
+    // price after taking into account the confidence
+    let possible_last_basket_price : u64 = basket.last_price + basket.confidence;
+    // worst case price = maximum price + 1%
+    let worst_case_price =  possible_last_basket_price + possible_last_basket_price.checked_div(100).unwrap();
+    // check if maximum allowed price is 1 percent higher than the current price
+    assert!(maximum_allowed_price > worst_case_price);
+
+    assert!(ctx.accounts.quote_token_transaction_pool.key() == group.quote_token_transaction_pool);
+
+    // transfer usdc from client to account
+    let accounts = token::Transfer {
+        from: ctx.accounts.paying_account.to_account_info().clone(),
+        to: ctx.accounts.quote_token_transaction_pool.to_account_info().clone(),
+        authority: ctx.accounts.user.to_account_info(),
+    };
+    let transfer_ctx = CpiContext::new(ctx.accounts.token_program.clone(), accounts);
+    token::transfer( transfer_ctx, worst_case_price)?;
+
+    buy_context.side = ContextSide::Buy;
+    buy_context.basket = basket.key();
+    buy_context.reverting = 0;
+    buy_context.usdc_amount_left = worst_case_price;
+    buy_context.paying_account = ctx.accounts.paying_account.key();
+    buy_context.user_basket_token_account = ctx.accounts.user_basket_token_account.key();
+    buy_context.initial_usdc_transfer_amount = worst_case_price;
+    buy_context.tokens_treated = [1; MAX_NB_TOKENS];
+
     for component_index in 0..basket.number_of_components {
         let component : &BasketComponentDescription = &basket.components[component_index as usize];
         let token = &group.token_description[component.token_index as usize];
-        let position = markets.iter().position( |x| *x.base_token_mint.key == token.token_mint);
-        
-        // check if we found the token mint in our token list
-        assert_ne!(position, None);
-        // check if the two tokens swaping are not the name.
-        assert_ne!( token.token_mint, *ctx.accounts.paying_account.to_account_info().key);
+        let position = component.token_index as usize;
 
-        let market = &markets[position.unwrap()];
-        assert_eq!(*market.token_pool.key, token.token_pool);
+        // check if we found the token mint in our token list
+        buy_context.tokens_treated[position] = 0;
 
         // calculate amount of tokens to transfer
         let amount_of_tokens = (amount as u128)
                                             .checked_mul(component.amount.into()).unwrap()
-                                            .checked_div(10u128.pow(exp.into())).unwrap()
+                                            .checked_div(10u128.pow(6)).unwrap()
                                             .checked_mul(10u128.pow(token.token_decimal.into())).unwrap()
                                             .checked_div(10u128.pow(component.decimal.into())).unwrap();
-
-        // swap usdc to coin
-        order(&ctx, market, u64::MAX, amount_of_tokens as u64, u64::MAX, Side::Ask)?;
-        settle_funds(&ctx, market)?;
+        
+        buy_context.token_amounts[position] = amount_of_tokens as u64;   
     }
-    let value_after_buying = token::accessor::amount(&ctx.accounts.paying_account.to_account_info())?;
-    assert!(value_before_buying - value_after_buying < maximum_allowed_price);
-    msg!("tokens");
-    // change authority back
-    change_authority(&ctx.accounts.paying_account.to_account_info(), 
-                    &ctx.accounts.authority, 
-                    ctx.accounts.user.key(), 
-                    &ctx.accounts.token_program, 
-                    Some(&[seeds]))?;
-    // TODO mint basket tokens to the user
     Ok(())
 }
 
+/*
 fn order<'info>( ctx: &Context<'_, '_, '_, 'info, BuyBasket<'info>>,
     market : &MarketAccounts<'info>,
     limit_price: u64,
     max_coin_qty: u64,
     max_native_pc_qty: u64,
     side: Side,
+    signer_seeds : &[&[&[u8]]]
 ) -> ProgramResult {
     // Client order id is only used for cancels. Not used here so hardcode.
     let client_order_id = 0;
@@ -253,7 +243,7 @@ fn order<'info>( ctx: &Context<'_, '_, '_, 'info, BuyBasket<'info>>,
         rent: ctx.accounts.rent.clone(),
     };
 
-    let ctx_orders = CpiContext::new(ctx.accounts.dex_program.clone(), new_orders);
+    let ctx_orders = CpiContext::new(ctx.accounts.dex_program.clone(), new_orders).with_signer(signer_seeds);
 
     dex::new_order_v3(
         ctx_orders,
@@ -284,6 +274,7 @@ fn settle_funds<'info>( ctx: &Context<'_, '_, '_, 'info, BuyBasket<'info>>,
     let settle_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), settle_accs);
     dex::settle_funds(settle_ctx)
 }
+*/
 
 fn change_authority<'info>(acc : &AccountInfo<'info>, 
                           from : &AccountInfo<'info>, 
@@ -300,4 +291,63 @@ fn change_authority<'info>(acc : &AccountInfo<'info>,
         cpi = cpi.with_signer(signer_seeds);
     }
     token::set_authority( cpi,  AuthorityType::AccountOwner, Some(to))
+}
+
+impl<'info> MarketAccounts<'info> {
+    fn print(&self){
+        {
+            let msg = format!(" market base_token_mint : {}", self.base_token_mint.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market market : {}", self.market.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market open_orders : {}", self.open_orders.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market request_queue : {}", self.request_queue.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market event_queue : {}", self.event_queue.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market bids : {}", self.bids.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market asks : {}", self.asks.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market token_vault : {}", self.token_vault.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market quote_token_vault : {}", self.quote_token_vault.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market vault_signer : {}", self.vault_signer.key.to_string());
+            msg!(&msg[..]);
+        }
+
+        {
+            let msg = format!(" market token_pool : {}", self.token_pool.key.to_string());
+            msg!(&msg[..]);
+        }
+    }
 }

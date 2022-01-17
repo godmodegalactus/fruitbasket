@@ -12,6 +12,7 @@ pub struct FruitBasketGroup {
     pub number_of_baskets : u8,    // number of baskets currenly create
     pub nb_users: u8,              // number of users registered
     pub token_description : [TokenDescription; 20],
+    pub quote_token_transaction_pool : Pubkey,
 }
 
 /// state to define a basket
@@ -24,7 +25,7 @@ pub struct Basket {
     pub basket_mint : Pubkey,
     pub last_price : u64,
     pub confidence : u64,
-    pub decimal : u8,
+    pub decimal : u8,               // always 6
 }
 
 #[account(zero_copy)]
@@ -44,6 +45,7 @@ pub struct TokenDescription
     pub token_name: [u8; 10],      // token names
     pub token_pool : Pubkey, // pool for each token 
     pub token_decimal : u8,     // number of decimal places for token (1 SOL -> 10^9 lamports = 9 decimal places )
+    pub token_open_orders : Pubkey,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Copy)]
@@ -94,6 +96,26 @@ impl Basket {
     }
 }
 
+
+#[derive(AnchorSerialize, AnchorDeserialize, Copy, Clone)]
+pub enum ContextSide {
+    Buy,
+    Sell,
+}
+
+#[account(zero_copy)]
+pub struct BasketTradeContext
+{
+    pub side: ContextSide,
+    pub basket: Pubkey,
+    pub token_amounts: [u64; 20],
+    pub tokens_treated: [u8; 20],
+    pub reverting : u8,
+    pub usdc_amount_left : u64,
+    pub paying_account: Pubkey,
+    pub user_basket_token_account : Pubkey,
+    pub initial_usdc_transfer_amount : u64,
+}
 
 pub struct MarketAccounts<'info> {
     pub base_token_mint : AccountInfo<'info>,

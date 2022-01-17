@@ -1,6 +1,6 @@
-import * as anchor from '@project-serum/anchor';
-import { Program, web3 } from '@project-serum/anchor';
-import { Fruitbasket } from '../target/types/fruitbasket';
+import * as anchor from "@project-serum/anchor";
+import { Program, web3 } from "@project-serum/anchor";
+import { Fruitbasket } from "../target/types/fruitbasket";
 import {
   NATIVE_MINT,
   Token,
@@ -9,20 +9,19 @@ import {
   u64,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   AccountInfo,
-} from '@solana/spl-token';
+} from "@solana/spl-token";
 import { Market, OpenOrders, DexInstructions } from "@project-serum/serum";
 
-import * as pyth from './utils/pyth'
-import * as serum from './utils/serum'
-import { token } from '@project-serum/anchor/dist/cjs/utils';
-import mlog from 'mocha-logger';
+import * as pyth from "./utils/pyth";
+import * as serum from "./utils/serum";
+import { token } from "@project-serum/anchor/dist/cjs/utils";
+import mlog from "mocha-logger";
 import { assert } from "chai";
-import { TestToken, TestUtils } from './utils/test_utils';
+import { TestToken, TestUtils } from "./utils/test_utils";
 
 type Connection = web3.Connection;
 
-describe('fruitbasket', () => {
-
+describe("fruitbasket", () => {
   // Configure the client to use the local cluster.
   const provider = anchor.Provider.env();
   anchor.setProvider(provider);
@@ -32,10 +31,12 @@ describe('fruitbasket', () => {
   const program = anchor.workspace.Fruitbasket as Program<Fruitbasket>;
   type FruitBasketGroup = anchor.IdlAccounts<Fruitbasket>["fruitBasketGroup"];
   type Basket = anchor.IdlAccounts<Fruitbasket>["basket"];
+  type BasketComponent =
+    anchor.IdlTypes<Fruitbasket>["BasketComponentDescription"];
 
   const owner = web3.Keypair.generate();
   const test_utils = new TestUtils(provider.connection, provider.wallet);
-  let serum_utils = new serum.SerumUtils( test_utils);
+  let serum_utils = new serum.SerumUtils(test_utils);
   let oracle = new pyth.Pyth(connection, wallet);
   const programId = program.programId;
 
@@ -49,59 +50,71 @@ describe('fruitbasket', () => {
   const shit1 = test_utils.createToken(6, wallet.publicKey);
   const shit2 = test_utils.createToken(6, wallet.publicKey);
 
-  let quote_token = usdc;
+  let quote_token: TestToken;
   let tokens = [btc, eth, sol, srm, mngo, shit1, shit2];
   const nb_tokens = tokens.length;
   let token_names = ["BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
-  let token_prices = [40000000n, 4000000n, 200000000n, 4000000n, 140000n, 145000n, 5000n];
+  let token_prices = [
+    40000000n,
+    4000000n,
+    200000000n,
+    4000000n,
+    140000n,
+    145000n,
+    5000n,
+  ];
   let token_exp = [-3, -3, -6, -6, -6, -6, -6];
   assert.ok(tokens.length == token_names.length);
-  assert.ok(tokens.length == token_prices.length)
+  assert.ok(tokens.length == token_prices.length);
   assert.ok(tokens.length == token_exp.length);
 
   let markets_by_tokens: Promise<Market[]> = null;
-  it( "Market intialized", async() => {
+  it("Market intialized", async () => {
     let t = await Promise.all(tokens);
-    let usdc = (await quote_token);
+    quote_token = await usdc;
     markets_by_tokens = Promise.all(
-      Array.from(Array(t.length).keys()).map(x => {
-         const marketPrice = Number(token_prices[x]) * (10 ** token_exp[x]);
-        return serum_utils.createAndMakeMarket(t[x], usdc, marketPrice);
+      Array.from(Array(t.length).keys()).map((x) => {
+        const marketPrice = Number(token_prices[x]) * 10 ** token_exp[x];
+        return serum_utils.createAndMakeMarket(t[x], quote_token, marketPrice);
       })
     );
     // await for all markets to get initialized
     await markets_by_tokens;
   });
 
-  
   // check if serum is loaded
-  let price_oracles = [] ;
+  let price_oracles = [];
   let produce_oracles = [];
-  it('Oracles initialized', async () => {
-    for(let i = 0; i< nb_tokens; ++i)
-    {
+  it("Oracles initialized", async () => {
+    for (let i = 0; i < nb_tokens; ++i) {
       price_oracles.push(oracle.createPriceAccount());
-      produce_oracles.push(oracle.createProductAccount());      
+      produce_oracles.push(oracle.createProductAccount());
     }
     let oracle_promises = [];
-    for(let i =0; i< nb_tokens; ++i){
-      oracle_promises.push( oracle.updatePriceAccount( await price_oracles[i], {
-        exponent: token_exp[i],
-        aggregatePriceInfo: {
-          price: token_prices[i] ,
-          conf: token_prices[i] / 100n, // 100 bps or 1% of the price of USDC
-        },
-      }));
+    for (let i = 0; i < nb_tokens; ++i) {
+      oracle_promises.push(
+        oracle.updatePriceAccount(await price_oracles[i], {
+          exponent: token_exp[i],
+          aggregatePriceInfo: {
+            price: token_prices[i],
+            conf: token_prices[i] / 100n, // 100 bps or 1% of the price of USDC
+          },
+        })
+      );
     }
 
-    for(let i = 0; i< nb_tokens; ++i) {
-      await Promise.all(oracle_promises)
+    for (let i = 0; i < nb_tokens; ++i) {
+      await Promise.all(oracle_promises);
     }
   });
 
   let frt_bsk_group = null;
   let frt_bsk_cache = null;
-  it('Group initialized', async () => {
+  let fruitbasket_authority: web3.PublicKey;
+  let fb_auth_bump: number;
+  let quote_token_transaction_pool: web3.PublicKey;
+
+  it("Group initialized", async () => {
     await provider.connection.confirmTransaction(
       await provider.connection.requestAirdrop(owner.publicKey, 100000000000),
       "confirmed"
@@ -112,76 +125,87 @@ describe('fruitbasket', () => {
       "confirmed"
     );
 
-    const [tmp_group, bump_grp] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_group'), owner.publicKey.toBuffer()], program.programId);
-    const [tmp_cache, bump_cache] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_cache'), owner.publicKey.toBuffer()], program.programId);
+    [fruitbasket_authority, fb_auth_bump] =
+      await web3.PublicKey.findProgramAddress(
+        [Buffer.from("fruitbasket_auth")],
+        programId
+      );
+    const [tmp_group, bump_grp] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("fruitbasket_group"), owner.publicKey.toBuffer()],
+      program.programId
+    );
+    const [tmp_cache, bump_cache] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("fruitbasket_cache"), owner.publicKey.toBuffer()],
+      program.programId
+    );
 
     frt_bsk_group = tmp_group;
     frt_bsk_cache = tmp_cache;
     mlog.log("group : " + frt_bsk_group);
     mlog.log("cache : " + frt_bsk_cache);
-    await program.rpc.initializeGroup(
-      bump_grp,
-      bump_cache,
-      (await usdc).publicKey,
-      "USDC",
-      {
-        accounts:{
-          owner: owner.publicKey,
-          fruitBasketGrp: frt_bsk_group,
-          cache: frt_bsk_cache,
-          systemProgram: web3.SystemProgram.programId,
-        },
-        signers:[owner]
-      }
+    quote_token_transaction_pool = await quote_token.createAccount(
+      owner.publicKey
     );
+    await program.rpc.initializeGroup(bump_grp, bump_cache, "USDC", {
+      accounts: {
+        owner: owner.publicKey,
+        fruitBasketGrp: frt_bsk_group,
+        cache: frt_bsk_cache,
+        quoteTokenMint: quote_token.publicKey,
+        quoteTokenTransactionPool: quote_token_transaction_pool,
+        systemProgram: web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      },
+      signers: [owner],
+    });
   });
 
-  let fruitbasket_authority : web3.PublicKey;
-  let fb_auth_bump : number;
-  let open_orders_by_token : web3.Keypair[];
-  let token_pools : web3.PublicKey[];
-  it( "Tokens added ", async() => {
-    [fruitbasket_authority, fb_auth_bump] = await web3.PublicKey.findProgramAddress([Buffer.from("fruitbasket_auth")], programId);
+  let open_orders_by_token: web3.Keypair[];
+  let token_pools: web3.PublicKey[];
+  it("Tokens added ", async () => {
     let token_list = await Promise.all(tokens);
-    const openOrdersSpace = OpenOrders.getLayout(serum.DEX_ID,).span;
-    open_orders_by_token = await Promise.all( token_list.map(async(x) => test_utils.createAccount(owner, serum.DEX_ID, openOrdersSpace) ) );
-    
-    token_pools = await Promise.all(token_list.map( async(x) => x.createAccount(owner.publicKey)));
+    const openOrdersSpace = OpenOrders.getLayout(serum.DEX_ID).span;
+    open_orders_by_token = await Promise.all(
+      token_list.map(async (x) =>
+        test_utils.createAccount(owner, serum.DEX_ID, openOrdersSpace)
+      )
+    );
+
+    token_pools = await Promise.all(
+      token_list.map(async (x) => x.createAccount(owner.publicKey))
+    );
     let markets = await markets_by_tokens;
-    for(let index = 0; index < nb_tokens; ++index){
+    for (let index = 0; index < nb_tokens; ++index) {
       let marketKey = markets[index].publicKey;
-      let open_orders = open_orders_by_token[index]; 
-      await program.rpc.addToken(
-        token_names[index],
-        {
-          accounts : {
-            owner : owner.publicKey,
-            fruitBasketGrp: frt_bsk_group,
-            mint : token_list[index].publicKey,
-            priceOracle : (await price_oracles[index]).publicKey,
-            productOracle : (await produce_oracles[index]).publicKey,
-            tokenPool: token_pools[index],
-            market: marketKey,
-            openOrdersAccount : open_orders.publicKey,
-            fruitbasketAuthority: fruitbasket_authority,
-            tokenProgram : TOKEN_PROGRAM_ID,
-            dexProgram : serum.DEX_ID,
-            rent : web3.SYSVAR_RENT_PUBKEY,
-          },
-          signers : [owner],
-        }
-      );
-    };
-  } );
+      let open_orders = open_orders_by_token[index];
+      await program.rpc.addToken(token_names[index], {
+        accounts: {
+          owner: owner.publicKey,
+          fruitBasketGrp: frt_bsk_group,
+          mint: token_list[index].publicKey,
+          priceOracle: (await price_oracles[index]).publicKey,
+          productOracle: (await produce_oracles[index]).publicKey,
+          tokenPool: token_pools[index],
+          market: marketKey,
+          openOrdersAccount: open_orders.publicKey,
+          fruitbasketAuthority: fruitbasket_authority,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          dexProgram: serum.DEX_ID,
+          rent: web3.SYSVAR_RENT_PUBKEY,
+        },
+        signers: [owner],
+      });
+    }
+  });
 
-  let basket_1 : web3.PublicKey;
-  let basket_2 : web3.PublicKey;
-  let basket_3 : web3.PublicKey;
-  let basket_1_mint :  web3.PublicKey;
-  let basket_2_mint :  web3.PublicKey;
-  let basket_3_mint :  web3.PublicKey;
+  let basket_1: web3.PublicKey;
+  let basket_2: web3.PublicKey;
+  let basket_3: web3.PublicKey;
+  let basket_1_mint: web3.PublicKey;
+  let basket_2_mint: web3.PublicKey;
+  let basket_3_mint: web3.PublicKey;
 
-  it( "Baskets created ", async() => {
+  it("Baskets created ", async () => {
     const exp = 1000000;
     let comp_btc = new ComponentInfo();
     comp_btc.tokenIndex = 0;
@@ -220,8 +244,14 @@ describe('fruitbasket', () => {
 
     // first basket
     let basket_nb = 0;
-    const [_basket_1, bump_b1] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
-    const [_basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
+    const [_basket_1, bump_b1] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("fruitbasket"), Buffer.from([basket_nb])],
+      program.programId
+    );
+    const [_basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("fruitbasket_mint"), Buffer.from([basket_nb])],
+      program.programId
+    );
     const components_1 = [comp_btc, comp_eth, comp_sol];
     basket_1 = _basket_1;
     basket_1_mint = _basket_1_mint;
@@ -234,23 +264,29 @@ describe('fruitbasket', () => {
       "Basket for first teer coins",
       components_1,
       {
-        accounts : {
-          client : owner.publicKey,
-          group : frt_bsk_group,
-          basket : basket_1,
-          basketMint : basket_1_mint,
-          systemProgram : web3.SystemProgram.programId,
-          tokenProgram : TOKEN_PROGRAM_ID,
-          rent : web3.SYSVAR_RENT_PUBKEY,
+        accounts: {
+          client: owner.publicKey,
+          group: frt_bsk_group,
+          basket: basket_1,
+          basketMint: basket_1_mint,
+          systemProgram: web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          rent: web3.SYSVAR_RENT_PUBKEY,
         },
-        signers: [owner]
+        signers: [owner],
       }
     );
 
     // second basket
     ++basket_nb;
-    const [_basket_2, bump_b2] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
-    const [_basket_2_mint, bump_b2m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
+    const [_basket_2, bump_b2] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("fruitbasket"), Buffer.from([basket_nb])],
+      program.programId
+    );
+    const [_basket_2_mint, bump_b2m] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("fruitbasket_mint"), Buffer.from([basket_nb])],
+      program.programId
+    );
     const components_2 = [comp_sol, comp_srm, comp_mngo];
     basket_2 = _basket_2;
     basket_2_mint = _basket_2_mint;
@@ -263,23 +299,29 @@ describe('fruitbasket', () => {
       "Basket for coins base on solana",
       components_2,
       {
-        accounts : {
-          client : owner.publicKey,
-          group : frt_bsk_group,
-          basket : basket_2,
-          basketMint : basket_2_mint,
-          systemProgram : web3.SystemProgram.programId,
-          tokenProgram : TOKEN_PROGRAM_ID,
-          rent : web3.SYSVAR_RENT_PUBKEY,
+        accounts: {
+          client: owner.publicKey,
+          group: frt_bsk_group,
+          basket: basket_2,
+          basketMint: basket_2_mint,
+          systemProgram: web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          rent: web3.SYSVAR_RENT_PUBKEY,
         },
-        signers: [owner]
+        signers: [owner],
       }
     );
 
     // third basket
     ++basket_nb;
-    const [_basket_3, bump_b3] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket'), Buffer.from([basket_nb])], program.programId);
-    const [_basket_3_mint, bump_b3m] = await web3.PublicKey.findProgramAddress([Buffer.from('fruitbasket_mint'), Buffer.from([basket_nb])], program.programId);
+    const [_basket_3, bump_b3] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("fruitbasket"), Buffer.from([basket_nb])],
+      program.programId
+    );
+    const [_basket_3_mint, bump_b3m] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("fruitbasket_mint"), Buffer.from([basket_nb])],
+      program.programId
+    );
     const components_3 = [comp_sh1, comp_sh2];
     basket_3 = _basket_3;
     basket_3_mint = _basket_3_mint;
@@ -292,24 +334,25 @@ describe('fruitbasket', () => {
       "Basket for shit coins that have potential in future",
       components_3,
       {
-        accounts : {
-          client : owner.publicKey,
-          group : frt_bsk_group,
-          basket : basket_3,
-          basketMint : basket_3_mint,
-          systemProgram : web3.SystemProgram.programId,
-          tokenProgram : TOKEN_PROGRAM_ID,
-          rent : web3.SYSVAR_RENT_PUBKEY,
+        accounts: {
+          client: owner.publicKey,
+          group: frt_bsk_group,
+          basket: basket_3,
+          basketMint: basket_3_mint,
+          systemProgram: web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          rent: web3.SYSVAR_RENT_PUBKEY,
         },
-        signers: [owner]
+        signers: [owner],
       }
     );
-  } );
+  });
 
-  it("oracle group tests", async() => {
-    let group_info : FruitBasketGroup = await program.account.fruitBasketGroup.fetch(frt_bsk_group);
-    
-    assert.ok(group_info.baseMint.equals((await usdc).publicKey));
+  it("oracle group tests", async () => {
+    let group_info: FruitBasketGroup =
+      await program.account.fruitBasketGroup.fetch(frt_bsk_group);
+
+    assert.ok(group_info.baseMint.equals(quote_token.publicKey));
     assert.ok(group_info.nbUsers == 0);
     assert.ok(group_info.numberOfBaskets == 3);
     assert.ok(group_info.tokenCount == nb_tokens);
@@ -318,107 +361,153 @@ describe('fruitbasket', () => {
     // }
   });
 
-  it("cache updated", async() =>{
-    await Promise.all( price_oracles.map( async(x) => {
-      await program.rpc.updatePrice(
-        {
-          accounts : {
-            group : frt_bsk_group,
-            cache : frt_bsk_cache,
-            oracleAi : (await x).publicKey,
-          }
-        }
-      );
-    }));
+  it("cache updated", async () => {
+    await Promise.all(
+      price_oracles.map(async (x) => {
+        await program.rpc.updatePrice({
+          accounts: {
+            group: frt_bsk_group,
+            cache: frt_bsk_cache,
+            oracleAi: (await x).publicKey,
+          },
+        });
+      })
+    );
   });
-  
+  let basket_1_price : anchor.BN;
+  let basket_1_confidence : anchor.BN;
   it("basket priced", async () => {
     // price basket 1
-    await program.rpc.updateBasketPrice(
-      {
-        accounts : {
-          basket : basket_1,
-          cache : frt_bsk_cache,
-        }        
-      }
-    );
-    const basket_1_info : Basket = await program.account.basket.fetch(basket_1);
+    await program.rpc.updateBasketPrice({
+      accounts: {
+        basket: basket_1,
+        cache: frt_bsk_cache,
+      },
+    });
+    const basket_1_info: Basket = await program.account.basket.fetch(basket_1);
+    basket_1_price = basket_1_info.lastPrice;
+    basket_1_confidence = basket_1_info.confidence;
     assert.ok(basket_1_info.lastPrice.toNumber() == 1200000000);
     assert.ok(basket_1_info.decimal == 6);
     assert.ok(basket_1_info.confidence.toNumber() == 12000000);
 
     // price basket 2
-    await program.rpc.updateBasketPrice(
-      {
-        accounts : {
-          basket : basket_2,
-          cache : frt_bsk_cache,
-        }        
-      }
-    );
+    await program.rpc.updateBasketPrice({
+      accounts: {
+        basket: basket_2,
+        cache: frt_bsk_cache,
+      },
+    });
 
-    const basket_2_info : Basket = await program.account.basket.fetch(basket_2);
+    const basket_2_info: Basket = await program.account.basket.fetch(basket_2);
     assert.ok(basket_2_info.lastPrice.toNumber() > 0);
     assert.ok(basket_2_info.decimal == 6);
     assert.ok(basket_2_info.confidence.toNumber() > 0);
 
-
     // price basket 3
-    await program.rpc.updateBasketPrice(
-      {
-        accounts : {
-          basket : basket_3,
-          cache : frt_bsk_cache,
-        }        
-      }
-    );
-    const basket_3_info : Basket = await program.account.basket.fetch(basket_3);
+    await program.rpc.updateBasketPrice({
+      accounts: {
+        basket: basket_3,
+        cache: frt_bsk_cache,
+      },
+    });
+    const basket_3_info: Basket = await program.account.basket.fetch(basket_3);
     assert.ok(basket_3_info.lastPrice.toNumber() > 0);
     assert.ok(basket_3_info.decimal == 6);
     assert.ok(basket_3_info.confidence.toNumber() > 0);
-
   });
-   let market_data;
-   let client_1 = web3.Keypair.generate();
-   let client_usdc_acc : web3.PublicKey;
-   let client_basket_token_acc : web3.PublicKey;
-  it( "Buy Basket", async() => {
-    await connection.confirmTransaction(await connection.requestAirdrop(client_1.publicKey, 10 * web3.LAMPORTS_PER_SOL));
-    
+  let market_data;
+  let client_1 = web3.Keypair.generate();
+  let client_usdc_acc: web3.PublicKey;
+  let client_basket_token_acc: web3.PublicKey;
+
+  type BasketTradeContext = anchor.IdlAccounts<Fruitbasket>["basketTradeContext"];
+  const ContextSide = {
+    Buy: { buy: {} },
+    Sell: { sell: {} },
+  };
+
+  it("Buy Basket", async () => {
+    await connection.confirmTransaction(
+      await connection.requestAirdrop(
+        client_1.publicKey,
+        10 * web3.LAMPORTS_PER_SOL
+      )
+    );
+
     let markets = await markets_by_tokens;
     let token_list = await Promise.all(tokens);
-    market_data = await CreateMarketInfo(markets, token_list);
+    market_data = await CreateMarketInfo(basket_1, markets, token_list);
     let max_price = new anchor.BN(10 ** 10);
     client_usdc_acc = await (await usdc).createAccount(client_1.publicKey);
     // deposit some usdc
-    await (await usdc).mintTo(client_usdc_acc, wallet.publicKey, [test_utils.payer()], max_price.toNumber());
+    quote_token.mintTo(
+      client_usdc_acc,
+      wallet.publicKey,
+      [test_utils.payer()],
+      max_price.toNumber()
+    );
 
-    let client_basket_token = new Token(connection, basket_1_mint, TOKEN_PROGRAM_ID, owner);
-    client_basket_token_acc = await client_basket_token.createAccount(client_1.publicKey);
-    await program.rpc.buyBasket( 
-      new anchor.BN(12345),
-      3,
-      new anchor.BN(markets.length),
+    let client_basket_token = new Token(
+      connection,
+      basket_1_mint,
+      TOKEN_PROGRAM_ID,
+      owner
+    );
+    client_basket_token_acc = await client_basket_token.createAccount(
+      client_1.publicKey
+    );
+    const [buy_context, buy_context_bump] =
+      await web3.PublicKey.findProgramAddress(
+        [
+          Buffer.from("fruitbasket_context"),
+          client_1.publicKey.toBuffer(),
+          Buffer.from([0]),
+        ],
+        programId
+      );
+
+    await program.rpc.initBuyBasket(
+      0,
+      buy_context_bump,
+      new anchor.BN(1000000), // buy 1 basket
       new anchor.BN(max_price),
       {
-        accounts : {
-          group : frt_bsk_group,
-          user : client_1.publicKey,
-          basket : basket_1,
-          payingAccount : client_usdc_acc,
-          userBasketTokenAccount : client_basket_token_acc,
-          payingTokenMint : (await usdc).publicKey,
-          fruitBasketMint : basket_1_mint,
-          authority : fruitbasket_authority,
-          dexProgram : serum.DEX_ID,
-          tokenProgram : TOKEN_PROGRAM_ID,
-          rent : web3.SYSVAR_RENT_PUBKEY,
+        accounts: {
+          group: frt_bsk_group,
+          user: client_1.publicKey,
+          basket: basket_1,
+          cache: frt_bsk_cache,
+          payingAccount: client_usdc_acc,
+          userBasketTokenAccount: client_basket_token_acc,
+          payingTokenMint: quote_token.publicKey,
+          buyContext: buy_context,
+          quoteTokenTransactionPool: quote_token_transaction_pool,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: web3.SystemProgram.programId,
         },
-        signers : [client_1],
-        remainingAccounts : market_data,
+        signers: [client_1],
       }
     );
-  } );
+    const basket_1_info: Basket = await program.account.basket.fetch(basket_1);
+    const basket_components : [BasketComponent] = basket_1_info.components;
+    const buy_context_info: BasketTradeContext = await program.account.basketTradeContext.fetch(buy_context);
+    const worst_basket_price = 1224120000;
+    
+    assert.equal(buy_context_info.basket.toString(), basket_1.toString());
+    assert.equal(buy_context_info.reverting, 0);
+    assert.equal(buy_context_info.usdcAmountLeft.toNumber(), worst_basket_price);
+    assert.equal(buy_context_info.payingAccount.toString(), client_usdc_acc.toString());
+    assert.equal(buy_context_info.userBasketTokenAccount.toString(), client_basket_token_acc.toString());
+    assert.equal(buy_context_info.initialUsdcTransferAmount.toNumber(), worst_basket_price);
+    for( let i = 0; i < basket_1_info.numberOfComponents; ++i)
+    {
+      const component : BasketComponent = basket_components[i];
+
+      assert.equal(buy_context_info.tokensTreated[component.tokenIndex], 0);
+      assert.equal(buy_context_info.tokenAmounts[component.tokenIndex].toNumber(), component.amount.toNumber()); // check that amount of tokens to transfer matches with component amount
+    }
+  });
 
   function ComponentInfo() {
     this.tokenIndex;
@@ -426,25 +515,75 @@ describe('fruitbasket', () => {
     this.decimal;
   }
 
-  async function CreateMarketInfo(markets : Market[], tokens : TestToken[]) {
+  async function CreateMarketInfo(
+    basket: web3.PublicKey,
+    markets: Market[],
+    tokens: TestToken[]
+  ) {
     let info = [];
+    const basket_info: Basket = await program.account.basket.fetch(basket);
+    const baket_components: [BasketComponent] = basket_info.components;
     assert.ok(tokens.length == markets.length);
     assert.ok(tokens.length == open_orders_by_token.length);
-    for (let index = 0; index < 1; ++index) {
+
+    for (let i = 0; i < 2; ++i) {
+      let index = baket_components[i].tokenIndex;
       const token = tokens[index];
       const market = markets[index];
-      const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(market.publicKey);
-      info.push({ isSigner: false, isWritable: false, pubkey: token.publicKey });
-      info.push({ isSigner: false, isWritable: true, pubkey: market.publicKey });
-      info.push({ isSigner: false, isWritable: true, pubkey: open_orders_by_token[index].publicKey });
-      info.push({ isSigner: false, isWritable: true, pubkey: market._decoded.requestQueue });
-      info.push({ isSigner: false, isWritable: true, pubkey: market._decoded.eventQueue });
-      info.push({ isSigner: false, isWritable: true, pubkey: market._decoded.bids });
-      info.push({ isSigner: false, isWritable: true, pubkey: market._decoded.asks });
-      info.push({ isSigner: false, isWritable: true, pubkey: market._decoded.baseVault });
-      info.push({ isSigner: false, isWritable: true, pubkey: market._decoded.quoteVault });
+      const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(
+        market.publicKey
+      );
+      info.push({
+        isSigner: false,
+        isWritable: false,
+        pubkey: token.publicKey,
+      });
+      info.push({
+        isSigner: false,
+        isWritable: true,
+        pubkey: market.publicKey,
+      });
+      info.push({
+        isSigner: false,
+        isWritable: true,
+        pubkey: open_orders_by_token[index].publicKey,
+      });
+      info.push({
+        isSigner: false,
+        isWritable: true,
+        pubkey: market._decoded.requestQueue,
+      });
+      info.push({
+        isSigner: false,
+        isWritable: true,
+        pubkey: market._decoded.eventQueue,
+      });
+      info.push({
+        isSigner: false,
+        isWritable: true,
+        pubkey: market._decoded.bids,
+      });
+      info.push({
+        isSigner: false,
+        isWritable: true,
+        pubkey: market._decoded.asks,
+      });
+      info.push({
+        isSigner: false,
+        isWritable: true,
+        pubkey: market._decoded.baseVault,
+      });
+      info.push({
+        isSigner: false,
+        isWritable: true,
+        pubkey: market._decoded.quoteVault,
+      });
       info.push({ isSigner: false, isWritable: false, pubkey: vault_signer });
-      info.push({ isSigner: false, isWritable: true, pubkey: token_pools[index]});
+      info.push({
+        isSigner: false,
+        isWritable: true,
+        pubkey: token_pools[index],
+      });
     }
     return info;
   }
