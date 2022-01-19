@@ -99,6 +99,7 @@ impl Basket {
 
 
 #[derive(AnchorSerialize, AnchorDeserialize, Copy, Clone)]
+#[repr(C)]
 pub enum ContextSide {
     Buy,
     Sell,
@@ -107,7 +108,7 @@ pub enum ContextSide {
 #[account(zero_copy)]
 pub struct BasketTradeContext
 {
-    pub side: ContextSide,
+    pub side: u8,
     pub basket: Pubkey,
     pub reverting : u8,
     pub usdc_amount_left : u64,
@@ -116,18 +117,4 @@ pub struct BasketTradeContext
     pub initial_usdc_transfer_amount : u64,
     pub token_amounts: [u64; 20],
     pub tokens_treated: [u8; 20],
-}
-
-pub struct MarketAccounts<'info> {
-    pub base_token_mint : AccountInfo<'info>,
-    pub market: AccountInfo<'info>,             //mutable
-    pub open_orders: AccountInfo<'info>,        //mutable
-    pub request_queue: AccountInfo<'info>,      //mutable
-    pub event_queue: AccountInfo<'info>,        //mutable
-    pub bids: AccountInfo<'info>,               //mutable
-    pub asks: AccountInfo<'info>,               //mutable
-    pub token_vault: AccountInfo<'info>,        //mutable
-    pub quote_token_vault: AccountInfo<'info>,  //mutable
-    pub vault_signer: AccountInfo<'info>,
-    pub token_pool : AccountInfo<'info>,        //mutable
 }

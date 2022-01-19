@@ -188,7 +188,7 @@ pub fn init_buy_basket(
     let transfer_ctx = CpiContext::new(ctx.accounts.token_program.clone(), accounts);
     token::transfer( transfer_ctx, worst_case_price)?;
 
-    buy_context.side = ContextSide::Buy;
+    buy_context.side = 0;
     buy_context.basket = basket.key();
     buy_context.reverting = 0;
     buy_context.usdc_amount_left = worst_case_price;
@@ -226,7 +226,7 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let token_index = _token_index.unwrap();
     let fruitbasket = &ctx.accounts.fruitbasket;
     let _component_in_basket = fruitbasket.components.iter().position(|x| (x.token_index as usize) == token_index);
-    if(_component_in_basket == None)
+    if _component_in_basket == None 
     {
         return Ok(());
     }
@@ -251,10 +251,6 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
             let market_state = MarketState::load(market, dex_program.key)?;
             buy_context.token_amounts[token_index].checked_div(market_state.coin_lot_size).unwrap()
         };
-        {
-            let msg = format!("token_index : {} amount :  {} usdc left : {} pool_amount_before {} quantity {}", token_index, buy_context.token_amounts[token_index], buy_context.usdc_amount_left, value_before_transaction, max_coin_qty);
-            msg!(&msg[..]);
-        }
         let new_orders = dex::NewOrderV3 {
             market: market.clone(),
             open_orders: ctx.accounts.open_orders.clone(),
@@ -313,67 +309,6 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     Ok(())
 }
 
-/*
-fn order<'info>( ctx: &Context<'_, '_, '_, 'info, BuyBasket<'info>>,
-    market : &MarketAccounts<'info>,
-    limit_price: u64,
-    max_coin_qty: u64,
-    max_native_pc_qty: u64,
-    side: Side,
-    signer_seeds : &[&[&[u8]]]
-) -> ProgramResult {
-    // Client order id is only used for cancels. Not used here so hardcode.
-    let client_order_id = 0;
-    let limit = 65535;
-
-    let new_orders = dex::NewOrderV3 {
-        market: market.market.clone(),
-        open_orders: market.open_orders.clone(),
-        request_queue: market.request_queue.clone(),
-        event_queue: market.event_queue.clone(),
-        market_bids: market.bids.clone(),
-        market_asks: market.asks.clone(),
-        order_payer_token_account: market.token_pool.clone(),
-        open_orders_authority: ctx.accounts.authority.clone(),
-        coin_vault: market.token_vault.clone(),
-        pc_vault: market.quote_token_vault.clone(),
-        token_program: ctx.accounts.token_program.clone(),
-        rent: ctx.accounts.rent.clone(),
-    };
-
-    let ctx_orders = CpiContext::new(ctx.accounts.dex_program.clone(), new_orders).with_signer(signer_seeds);
-
-    dex::new_order_v3(
-        ctx_orders,
-        side,
-        NonZeroU64::new(limit_price).unwrap(),
-        NonZeroU64::new(max_coin_qty).unwrap(),
-        NonZeroU64::new(max_native_pc_qty).unwrap(),
-        SelfTradeBehavior::DecrementTake,
-        OrderType::ImmediateOrCancel,
-        client_order_id,
-        limit,
-    )
-}
-
-fn settle_funds<'info>( ctx: &Context<'_, '_, '_, 'info, BuyBasket<'info>>,
-                        market : &MarketAccounts<'info> ) -> ProgramResult {
-    let settle_accs = dex::SettleFunds {
-        market: market.market.clone(),
-        open_orders: market.open_orders.clone(),
-        open_orders_authority: ctx.accounts.authority.clone(),
-        coin_vault: market.token_vault.clone(),
-        pc_vault: market.quote_token_vault.clone(),
-        coin_wallet: market.token_pool.clone(),
-        pc_wallet: ctx.accounts.paying_account.to_account_info().clone(),
-        vault_signer: market.vault_signer.clone(),
-        token_program: ctx.accounts.token_program.clone(),
-    };
-    let settle_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), settle_accs);
-    dex::settle_funds(settle_ctx)
-}
-*/
-
 fn change_authority<'info>(acc : &AccountInfo<'info>, 
                           from : &AccountInfo<'info>, 
                           to: Pubkey, 
@@ -389,63 +324,4 @@ fn change_authority<'info>(acc : &AccountInfo<'info>,
         cpi = cpi.with_signer(signer_seeds);
     }
     token::set_authority( cpi,  AuthorityType::AccountOwner, Some(to))
-}
-
-impl<'info> MarketAccounts<'info> {
-    fn print(&self){
-        {
-            let msg = format!(" market base_token_mint : {}", self.base_token_mint.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market market : {}", self.market.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market open_orders : {}", self.open_orders.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market request_queue : {}", self.request_queue.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market event_queue : {}", self.event_queue.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market bids : {}", self.bids.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market asks : {}", self.asks.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market token_vault : {}", self.token_vault.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market quote_token_vault : {}", self.quote_token_vault.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market vault_signer : {}", self.vault_signer.key.to_string());
-            msg!(&msg[..]);
-        }
-
-        {
-            let msg = format!(" market token_pool : {}", self.token_pool.key.to_string());
-            msg!(&msg[..]);
-        }
-    }
 }

@@ -185,3 +185,8 @@ pub struct ProcessTokenOnContext<'info> {
     // // Sysvars.
     pub rent: AccountInfo<'info>,
 }
+
+#[derive(Accounts)]
+pub struct FinalizeContext {
+    
+}

@@ -356,9 +356,6 @@ describe("fruitbasket", () => {
     assert.ok(group_info.nbUsers == 0);
     assert.ok(group_info.numberOfBaskets == 3);
     assert.ok(group_info.tokenCount == nb_tokens);
-    // for (let token_desc in group_info.tokenDescription){
-
-    // }
   });
 
   it("cache updated", async () => {
@@ -492,32 +489,37 @@ describe("fruitbasket", () => {
         signers: [client_1],
       }
     );
-    const basket_1_info: Basket = await program.account.basket.fetch(basket_1);
-    const basket_components : [BasketComponent] = basket_1_info.components;
-    const buy_context_info: BasketTradeContext = await program.account.basketTradeContext.fetch(buy_context);
-    const worst_basket_price = 1224120000;
     
-    assert.equal(buy_context_info.basket.toString(), basket_1.toString());
-    assert.equal(buy_context_info.reverting, 0);
-    assert.equal(buy_context_info.usdcAmountLeft.toNumber(), worst_basket_price);
-    assert.equal(buy_context_info.payingAccount.toString(), client_usdc_acc.toString());
-    assert.equal(buy_context_info.userBasketTokenAccount.toString(), client_basket_token_acc.toString());
-    assert.equal(buy_context_info.initialUsdcTransferAmount.toNumber(), worst_basket_price);
-    for( let i = 0; i < basket_1_info.numberOfComponents; ++i)
+    const token_amounts_in_basket : Number[] = token_list.map(x => new Number(0));
+    // test context info before transaction
     {
-      const component : BasketComponent = basket_components[i];
+      const basket_1_info: Basket = await program.account.basket.fetch(basket_1);
+      const basket_components : [BasketComponent] = basket_1_info.components;
+      const buy_context_info: BasketTradeContext = await program.account.basketTradeContext.fetch(buy_context);
+      const worst_basket_price = 1224120000;
+      
+      assert.equal(buy_context_info.basket.toString(), basket_1.toString());
+      assert.equal(buy_context_info.reverting, 0);
+      assert.equal(buy_context_info.usdcAmountLeft.toNumber(), worst_basket_price);
+      assert.equal(buy_context_info.payingAccount.toString(), client_usdc_acc.toString());
+      assert.equal(buy_context_info.userBasketTokenAccount.toString(), client_basket_token_acc.toString());
+      assert.equal(buy_context_info.initialUsdcTransferAmount.toNumber(), worst_basket_price);
+      for( let i = 0; i < basket_1_info.numberOfComponents; ++i)
+      {
+        const component : BasketComponent = basket_components[i];
 
-      assert.equal(buy_context_info.tokensTreated[component.tokenIndex], 0);
-      assert.equal(buy_context_info.tokenAmounts[component.tokenIndex].toNumber(), component.amount.toNumber()); // check that amount of tokens to transfer matches with component amount
+        assert.equal(buy_context_info.tokensTreated[component.tokenIndex], 0);
+        assert.equal(buy_context_info.tokenAmounts[component.tokenIndex].toNumber(), component.amount.toNumber()); // check that amount of tokens to transfer matches with component amount
+        // fill the array with appropriate token amounts
+        token_amounts_in_basket[component.tokenIndex] = component.amount.toNumber();
+      }
     }
     // after init buy context, we have to initialize each token one by one.
     for(let x =  token_list.length - 1; x >= 0; --x)
     {
       const token = token_list[x];
       const market = markets_by_tokens[x];
-      const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(
-        market.publicKey
-      );
+      const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(market.publicKey);
       // {
       //   const amount_before_transaction = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
       //   mlog.log( "index " + x + " amount_before_transaction " + amount_before_transaction );
@@ -548,14 +550,28 @@ describe("fruitbasket", () => {
           }
         }
       );
-
-      // {
-      //   const amount_after_transaction = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
-      //   mlog.log( "index " + x + " amount_after_transaction " + amount_after_transaction );
-      // }
+      const amount_of_token_in_pool = (await token.getAccountInfo(token_pools[x])).amount;
+      assert.equal(amount_of_token_in_pool.toNumber(), token_amounts_in_basket[x]);
     }
-
-
+    const amount_of_usdc_in_pool = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
+    assert.ok(amount_of_usdc_in_pool.toNumber() < 50 * (10**6)); // less than 50 dollars left
+    
+    // test context info after transaction
+    {
+      const buy_context_info: BasketTradeContext = await program.account.basketTradeContext.fetch(buy_context);
+      
+      assert.equal(buy_context_info.basket.toString(), basket_1.toString());
+      assert.equal(buy_context_info.reverting, 0);
+      assert.equal(buy_context_info.usdcAmountLeft.toNumber(), amount_of_usdc_in_pool.toNumber());
+      assert.equal(buy_context_info.payingAccount.toString(), client_usdc_acc.toString());
+      assert.equal(buy_context_info.userBasketTokenAccount.toString(), client_basket_token_acc.toString());
+      const basket_1_info: Basket = await program.account.basket.fetch(basket_1);
+      const basket_components : [BasketComponent] = basket_1_info.components;
+      for (let i = 0; i < token_list.length; ++i) {
+        const component : BasketComponent = basket_components[i];
+        assert.equal(buy_context_info.tokensTreated[component.tokenIndex], 1);
+      }
+    }
   });
 
   function ComponentInfo() {
