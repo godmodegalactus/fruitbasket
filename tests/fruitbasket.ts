@@ -57,31 +57,29 @@ describe("fruitbasket", () => {
   const nb_tokens = tokens.length;
   let token_names = ["BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
   let token_prices = [
-    40000000n,
-    4000000n,
+    40000000000n,
+    4000000000n,
     200000000n,
     4000000n,
-    140000n,
-    145000n,
-    5000n,
+    1400000n,
+    1000000n,
+    100000n,
   ];
-  let token_exp = [-3, -3, -6, -6, -6, -6, -6];
+  let token_exp = [-6, -6, -6, -6, -6, -6, -6];
   assert.ok(tokens.length == token_names.length);
   assert.ok(tokens.length == token_prices.length);
   assert.ok(tokens.length == token_exp.length);
 
-  let markets_by_tokens: Promise<Market[]> = null;
+  let markets_by_tokens: Market[] = [];
   it("Market intialized", async () => {
     let t = await Promise.all(tokens);
     quote_token = await usdc;
-    markets_by_tokens = Promise.all(
+    markets_by_tokens = await Promise.all(
       Array.from(Array(t.length).keys()).map((x) => {
-        const marketPrice = Number(token_prices[x]) * 10 ** token_exp[x];
-        return serum_utils.createAndMakeMarket(t[x], quote_token, 1);
+        const marketPrice = Number(token_prices[x]) * (10**token_exp[x]);
+        return serum_utils.createAndMakeMarket(t[x], quote_token, marketPrice, -token_exp[x]);
       })
     );
-    // await for all markets to get initialized
-    await markets_by_tokens;
   });
 
   // check if serum is loaded
@@ -176,7 +174,7 @@ describe("fruitbasket", () => {
     token_pools = await Promise.all(
       token_list.map(async (x) => x.createAccount(owner.publicKey))
     );
-    let markets = await markets_by_tokens;
+    let markets = markets_by_tokens;
     for (let index = 0; index < nb_tokens; ++index) {
       let marketKey = markets[index].publicKey;
       let open_orders = open_orders_by_token[index];
@@ -437,7 +435,7 @@ describe("fruitbasket", () => {
       )
     );
 
-    let markets = await markets_by_tokens;
+    let markets = markets_by_tokens;
     let token_list = await Promise.all(tokens);
     let max_price = new anchor.BN(10 ** 10);
     client_usdc_acc = await quote_token.createAccount(client_1.publicKey);
@@ -512,25 +510,18 @@ describe("fruitbasket", () => {
       assert.equal(buy_context_info.tokensTreated[component.tokenIndex], 0);
       assert.equal(buy_context_info.tokenAmounts[component.tokenIndex].toNumber(), component.amount.toNumber()); // check that amount of tokens to transfer matches with component amount
     }
-
-    //await Promise.all( Array.from(Array(token_list.length).keys()).map( async(x) => {
-    await quote_token.mintTo(
-      quote_token_transaction_pool,
-      wallet.publicKey,
-      [test_utils.payer()],
-      web3.LAMPORTS_PER_SOL * 1000,
-    );
+    // after init buy context, we have to initialize each token one by one.
     for(let x =  token_list.length - 1; x >= 0; --x)
     {
       const token = token_list[x];
-      const market = (await markets_by_tokens)[x];
+      const market = markets_by_tokens[x];
       const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(
         market.publicKey
       );
-      {
-        const amount_before_transaction = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
-        mlog.log( "index " + x + " amount_before_transaction " + amount_before_transaction );
-      }
+      // {
+      //   const amount_before_transaction = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
+      //   mlog.log( "index " + x + " amount_before_transaction " + amount_before_transaction );
+      // }
       await program.rpc.processTokenForContext(
         {
           accounts : {
@@ -558,12 +549,11 @@ describe("fruitbasket", () => {
         }
       );
 
-      {
-        const amount_after_transaction = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
-        mlog.log( "index " + x + " amount_after_transaction " + amount_after_transaction );
-      }
+      // {
+      //   const amount_after_transaction = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
+      //   mlog.log( "index " + x + " amount_after_transaction " + amount_after_transaction );
+      // }
     }
-    //}));
 
 
   });

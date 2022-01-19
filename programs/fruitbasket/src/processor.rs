@@ -230,8 +230,6 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     {
         return Ok(());
     }
-    let component_in_basket = _component_in_basket.unwrap();
-
     let mut buy_context = ctx.accounts.buy_context.load_mut()?;
 
     // checks to verify if we are in right context
@@ -245,30 +243,16 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let side : Side = Side::Bid;
     let market = &ctx.accounts.market;
     let dex_program = &ctx.accounts.dex_program;
-    // The loaded market must be dropped before CPI.
-            
-    msg!("trade started");
-    // {
-    //     let msg = format!("token_index : {} amount :  {} usdc left : {} cointlotsize {} quote_lotsize {}", 
-    //             token_index, 
-    //             buy_context.token_amounts[token_index], 
-    //             buy_context.usdc_amount_left, 
-    //             market_state.coin_lot_size, 
-    //             market_state.pc_lot_size);
-    //     msg!(&msg[..]);
-    // }
     // create new order
+    let quote_token_transaction_pool = &ctx.accounts.quote_token_transaction_pool.to_account_info();
+    let value_before_transaction = token::accessor::amount(quote_token_transaction_pool)?;
     {
-        msg!("1");
-        let quote_token_transaction_pool = &ctx.accounts.quote_token_transaction_pool.to_account_info();
-        let value_before_buying = token::accessor::amount(quote_token_transaction_pool)?;
-        
         let max_coin_qty = {
             let market_state = MarketState::load(market, dex_program.key)?;
             buy_context.token_amounts[token_index].checked_div(market_state.coin_lot_size).unwrap()
         };
         {
-            let msg = format!("token_index : {} amount :  {} usdc left : {} pool_amount_before {} quantity {}", token_index, buy_context.token_amounts[token_index], buy_context.usdc_amount_left, value_before_buying, max_coin_qty);
+            let msg = format!("token_index : {} amount :  {} usdc left : {} pool_amount_before {} quantity {}", token_index, buy_context.token_amounts[token_index], buy_context.usdc_amount_left, value_before_transaction, max_coin_qty);
             msg!(&msg[..]);
         }
         let new_orders = dex::NewOrderV3 {
@@ -285,7 +269,6 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
             token_program: ctx.accounts.token_program.clone(),
             rent: ctx.accounts.rent.clone(),
         };
-        msg!("2");
         let ctx_orders = CpiContext::new(dex_program.clone(), new_orders);
         dex::new_order_v3(
             ctx_orders.with_signer(&[seeds]),
@@ -298,7 +281,6 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
             client_order_id,
             limit,
         )?;
-        msg!("3");
     }
     // settle transaction
     {
@@ -324,9 +306,10 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
             msg!(&msg[..]);
         }
     }
-    msg!("trade finished");
+    let value_after_transaction = token::accessor::amount(quote_token_transaction_pool)?;
 
     buy_context.tokens_treated[token_index] = 1;
+    buy_context.usdc_amount_left -= value_before_transaction - value_after_transaction;
     Ok(())
 }
 

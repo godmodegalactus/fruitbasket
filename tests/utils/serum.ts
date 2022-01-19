@@ -109,7 +109,6 @@ export class SerumUtils {
         const account = await this.utils.createWallet(lamports);
         const tokenAccounts = {};
         const transactions = [];
-
         for (const [token, amount] of tokens) {
             const publicKey = await this.utils.createTokenAccount(
                 token,
@@ -123,11 +122,11 @@ export class SerumUtils {
         return new MarketMaker(this.utils, account, tokenAccounts);
     }
 
-    public async createAndMakeMarket(baseToken: TestToken, quoteToken: TestToken, marketPrice: number): Promise<Market> {
+    public async createAndMakeMarket(baseToken: TestToken, quoteToken: TestToken, marketPrice: number, exp : number): Promise<Market> {
         const market = await this.createMarket({
             baseToken,
             quoteToken,
-            baseLotSize: 100000,
+            baseLotSize: 1000,
             quoteLotSize: 100,
             feeRateBps: 0,
         });
@@ -135,12 +134,12 @@ export class SerumUtils {
             1 * LAMPORTS_PER_SOL,
             [
                 [baseToken, baseToken.amount(100000)],
-                [quoteToken, quoteToken.amount(50000)],
+                [quoteToken, quoteToken.amount(marketPrice * 100)],
             ]
         );
 
-        const bids = MarketMaker.makeOrders([[marketPrice * 0.995, 10000]]);
-        const asks = MarketMaker.makeOrders([[marketPrice * 1.005, 10000]]);
+        const bids = MarketMaker.makeOrders([[marketPrice * 0.995, 2]]);
+        const asks = MarketMaker.makeOrders([[marketPrice * 1.005, 2]]);
 
         await marketMaker.placeOrders(market, bids, asks);
         return market;
@@ -222,7 +221,6 @@ export class MarketMaker {
             openOrdersAccount: undefined,
             feeDiscountPubkey: null,
         };
-
         for (const entry of asks) {
             const { transaction, signers } =
                 await market.makePlaceOrderTransaction(

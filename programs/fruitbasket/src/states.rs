@@ -109,13 +109,13 @@ pub struct BasketTradeContext
 {
     pub side: ContextSide,
     pub basket: Pubkey,
-    pub token_amounts: [u64; 20],
-    pub tokens_treated: [u8; 20],
     pub reverting : u8,
     pub usdc_amount_left : u64,
     pub paying_account: Pubkey,
     pub user_basket_token_account : Pubkey,
     pub initial_usdc_transfer_amount : u64,
+    pub token_amounts: [u64; 20],
+    pub tokens_treated: [u8; 20],
 }
 
 pub struct MarketAccounts<'info> {

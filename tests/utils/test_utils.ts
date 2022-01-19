@@ -126,8 +126,7 @@ export class TestUtils {
     ): Promise<PublicKey> {
         if ("publicKey" in owner) {
             owner = owner.publicKey;
-        }
-
+        }       
         if (token.publicKey == NATIVE_MINT) {
             const account = await Token.createWrappedNativeAccount(
                 this.conn,
