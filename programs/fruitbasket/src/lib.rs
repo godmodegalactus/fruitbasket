@@ -15,6 +15,13 @@ mod processor;
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 const MAX_NB_TOKENS : usize = 20;
 const MAX_NB_COMPONENTS: usize = 10;
+const FRUIT_BASKET_GROUP : &[u8] = b"fruitbasket_group";
+const FRUIT_BASKET_CACHE : &[u8] = b"fruitbasket_cache";
+const FRUIT_BASKET_AUTHORITY : &[u8] = b"fruitbasket_auth";
+const FRUIT_BASKET : &[u8] = b"fruitbasket";
+const FRUIT_BASKET_MINT : &[u8] = b"fruitbasket_mint";
+const FRUIT_BASKET_CONTEXT : &[u8] = b"fruitbasket_context";
+
 mod empty {
     use super::*;
     declare_id!("HJt8Tjdsc9ms9i4WCZEzhzr4oyf3ANcdzXrNdLPFqm3M");
@@ -54,13 +61,17 @@ pub mod fruitbasket {
         processor::update_basket_price(ctx)
     }
 
-    pub fn init_buy_basket<'info>(
-        ctx: Context<'_, '_, '_, 'info, InitBuyBasket<'info>>,
+    pub fn init_buy_basket(
+        ctx: Context<InitBuyBasket>,
         _order_id: u8, 
         _context_bump : u8, 
         amount : u64,
         maximum_allowed_price : u64,
     ) -> ProgramResult {
         processor::init_buy_basket(ctx, amount, maximum_allowed_price)
+    }
+
+    pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> ProgramResult {
+        processor::process_token_for_context(ctx)
     }
 }

@@ -4,6 +4,7 @@ use crate::*;
 use anchor_spl::dex::serum_dex::matching::{OrderType, Side};
 use std::{num::NonZeroU64};
 use anchor_spl::dex::serum_dex::instruction::SelfTradeBehavior;
+use anchor_spl::dex::serum_dex::state::{ MarketState };
 
 pub fn initialize_group(
     ctx: Context<InitializeGroup>,
@@ -84,6 +85,7 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
     dex::init_open_orders(oo_ctx.with_signer(&[seeds]))?;
 
     group.token_description[current].token_open_orders = ctx.accounts.open_orders_account.key();
+    group.token_description[current].market = ctx.accounts.market.key();
     //group.token
     Ok(())
 }
@@ -158,8 +160,8 @@ pub fn update_basket_price(ctx : Context<UpdateBasketPrice>) -> ProgramResult{
 }
 
 
-pub fn init_buy_basket<'info>(
-    ctx: Context<'_, '_, '_, 'info, InitBuyBasket<'info>>,
+pub fn init_buy_basket(
+    ctx: Context<InitBuyBasket>,
     amount : u64,
     maximum_allowed_price : u64,
 ) -> ProgramResult {
@@ -212,6 +214,119 @@ pub fn init_buy_basket<'info>(
         
         buy_context.token_amounts[position] = amount_of_tokens as u64;   
     }
+    Ok(())
+}
+
+pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> ProgramResult {
+    let client_order_id = 0;
+    let limit = 65535;
+    let basket_group = ctx.accounts.fruitbasket_group.load()?;
+    let _token_index = basket_group.token_description.iter().position(|x| x.token_mint == ctx.accounts.token_mint.key());
+    assert_ne!(_token_index, None);
+    let token_index = _token_index.unwrap();
+    let fruitbasket = &ctx.accounts.fruitbasket;
+    let _component_in_basket = fruitbasket.components.iter().position(|x| (x.token_index as usize) == token_index);
+    if(_component_in_basket == None)
+    {
+        return Ok(());
+    }
+    let component_in_basket = _component_in_basket.unwrap();
+
+    let mut buy_context = ctx.accounts.buy_context.load_mut()?;
+
+    // checks to verify if we are in right context
+    assert_eq!(fruitbasket.key(), buy_context.basket); // same basketS
+    assert_eq!(buy_context.tokens_treated[token_index], 0); // check if the token is not already treated
+
+    let (pda, bump) =
+        Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
+    assert_eq!(ctx.accounts.fruit_basket_authority.key(), pda);
+    let seeds = &[&FRUIT_BASKET_AUTHORITY[..], &[bump]];
+    let side : Side = Side::Bid;
+    let market = &ctx.accounts.market;
+    let dex_program = &ctx.accounts.dex_program;
+    // The loaded market must be dropped before CPI.
+            
+    msg!("trade started");
+    // {
+    //     let msg = format!("token_index : {} amount :  {} usdc left : {} cointlotsize {} quote_lotsize {}", 
+    //             token_index, 
+    //             buy_context.token_amounts[token_index], 
+    //             buy_context.usdc_amount_left, 
+    //             market_state.coin_lot_size, 
+    //             market_state.pc_lot_size);
+    //     msg!(&msg[..]);
+    // }
+    // create new order
+    {
+        msg!("1");
+        let quote_token_transaction_pool = &ctx.accounts.quote_token_transaction_pool.to_account_info();
+        let value_before_buying = token::accessor::amount(quote_token_transaction_pool)?;
+        
+        let max_coin_qty = {
+            let market_state = MarketState::load(market, dex_program.key)?;
+            buy_context.token_amounts[token_index].checked_div(market_state.coin_lot_size).unwrap()
+        };
+        {
+            let msg = format!("token_index : {} amount :  {} usdc left : {} pool_amount_before {} quantity {}", token_index, buy_context.token_amounts[token_index], buy_context.usdc_amount_left, value_before_buying, max_coin_qty);
+            msg!(&msg[..]);
+        }
+        let new_orders = dex::NewOrderV3 {
+            market: market.clone(),
+            open_orders: ctx.accounts.open_orders.clone(),
+            request_queue: ctx.accounts.request_queue.clone(),
+            event_queue: ctx.accounts.event_queue.clone(),
+            market_bids: ctx.accounts.bids.clone(),
+            market_asks: ctx.accounts.asks.clone(),
+            order_payer_token_account: quote_token_transaction_pool.clone(),
+            open_orders_authority: ctx.accounts.fruit_basket_authority.clone(),
+            coin_vault: ctx.accounts.token_vault.clone(),
+            pc_vault: ctx.accounts.quote_token_vault.clone(),
+            token_program: ctx.accounts.token_program.clone(),
+            rent: ctx.accounts.rent.clone(),
+        };
+        msg!("2");
+        let ctx_orders = CpiContext::new(dex_program.clone(), new_orders);
+        dex::new_order_v3(
+            ctx_orders.with_signer(&[seeds]),
+            side,
+            NonZeroU64::new(u64::MAX).unwrap(),
+            NonZeroU64::new(max_coin_qty).unwrap(),
+            NonZeroU64::new(buy_context.usdc_amount_left).unwrap(),
+            SelfTradeBehavior::DecrementTake,
+            OrderType::ImmediateOrCancel,
+            client_order_id,
+            limit,
+        )?;
+        msg!("3");
+    }
+    // settle transaction
+    {
+        let token_pool = &ctx.accounts.token_pool.to_account_info();
+        let value_before_buying = token::accessor::amount(token_pool)?;
+        
+        let settle_accs = dex::SettleFunds {
+            market: ctx.accounts.market.clone(),
+            open_orders: ctx.accounts.open_orders.clone(),
+            open_orders_authority: ctx.accounts.fruit_basket_authority.clone(),
+            coin_vault: ctx.accounts.token_vault.clone(),
+            pc_vault: ctx.accounts.quote_token_vault.clone(),
+            coin_wallet: token_pool.to_account_info().clone(),
+            pc_wallet: ctx.accounts.quote_token_transaction_pool.to_account_info().clone(),
+            vault_signer: ctx.accounts.vault_signer.clone(),
+            token_program: ctx.accounts.token_program.clone(),
+        };
+        let settle_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), settle_accs);
+        dex::settle_funds(settle_ctx.with_signer(&[seeds]))?;
+        let value_after_buying = token::accessor::amount(token_pool)?;
+        {
+            let msg = format!("tokens got {}", value_after_buying - value_before_buying );
+            msg!(&msg[..]);
+        }
+    }
+    msg!("trade finished");
+
+    buy_context.tokens_treated[token_index] = 1;
     Ok(())
 }
 

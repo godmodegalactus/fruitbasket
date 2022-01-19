@@ -135,7 +135,7 @@ export class SerumUtils {
             1 * LAMPORTS_PER_SOL,
             [
                 [baseToken, baseToken.amount(100000)],
-                [quoteToken, quoteToken.amount(50000 * marketPrice)],
+                [quoteToken, quoteToken.amount(50000)],
             ]
         );
 

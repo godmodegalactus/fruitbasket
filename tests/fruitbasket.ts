@@ -10,6 +10,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   AccountInfo,
 } from "@solana/spl-token";
+
 import { Market, OpenOrders, DexInstructions } from "@project-serum/serum";
 
 import * as pyth from "./utils/pyth";
@@ -18,6 +19,7 @@ import { token } from "@project-serum/anchor/dist/cjs/utils";
 import mlog from "mocha-logger";
 import { assert } from "chai";
 import { TestToken, TestUtils } from "./utils/test_utils";
+import { TokenAccount } from "@blockworks-foundation/mango-client";
 
 type Connection = web3.Connection;
 
@@ -75,7 +77,7 @@ describe("fruitbasket", () => {
     markets_by_tokens = Promise.all(
       Array.from(Array(t.length).keys()).map((x) => {
         const marketPrice = Number(token_prices[x]) * 10 ** token_exp[x];
-        return serum_utils.createAndMakeMarket(t[x], quote_token, marketPrice);
+        return serum_utils.createAndMakeMarket(t[x], quote_token, 1);
       })
     );
     // await for all markets to get initialized
@@ -437,9 +439,8 @@ describe("fruitbasket", () => {
 
     let markets = await markets_by_tokens;
     let token_list = await Promise.all(tokens);
-    market_data = await CreateMarketInfo(basket_1, markets, token_list);
     let max_price = new anchor.BN(10 ** 10);
-    client_usdc_acc = await (await usdc).createAccount(client_1.publicKey);
+    client_usdc_acc = await quote_token.createAccount(client_1.publicKey);
     // deposit some usdc
     quote_token.mintTo(
       client_usdc_acc,
@@ -466,7 +467,11 @@ describe("fruitbasket", () => {
         ],
         programId
       );
-
+    
+    const usdc_before_transaction : TokenAccount = await quote_token.getAccountInfo(client_usdc_acc);
+    
+    usdc_before_transaction.amount
+    
     await program.rpc.initBuyBasket(
       0,
       buy_context_bump,
@@ -507,6 +512,60 @@ describe("fruitbasket", () => {
       assert.equal(buy_context_info.tokensTreated[component.tokenIndex], 0);
       assert.equal(buy_context_info.tokenAmounts[component.tokenIndex].toNumber(), component.amount.toNumber()); // check that amount of tokens to transfer matches with component amount
     }
+
+    //await Promise.all( Array.from(Array(token_list.length).keys()).map( async(x) => {
+    await quote_token.mintTo(
+      quote_token_transaction_pool,
+      wallet.publicKey,
+      [test_utils.payer()],
+      web3.LAMPORTS_PER_SOL * 1000,
+    );
+    for(let x =  token_list.length - 1; x >= 0; --x)
+    {
+      const token = token_list[x];
+      const market = (await markets_by_tokens)[x];
+      const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(
+        market.publicKey
+      );
+      {
+        const amount_before_transaction = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
+        mlog.log( "index " + x + " amount_before_transaction " + amount_before_transaction );
+      }
+      await program.rpc.processTokenForContext(
+        {
+          accounts : {
+            fruitbasketGroup : frt_bsk_group,
+            buyContext : buy_context,
+            tokenMint : token.publicKey,
+            quoteTokenMint : quote_token.publicKey,
+            fruitbasket : basket_1,
+            market : market.publicKey,
+            openOrders : open_orders_by_token[x].publicKey,
+            requestQueue : market._decoded.requestQueue,
+            eventQueue : market._decoded.eventQueue,
+            bids : market._decoded.bids,
+            asks: market._decoded.asks,
+            tokenVault: market._decoded.baseVault,
+            quoteTokenVault : market._decoded.quoteVault,
+            vaultSigner : vault_signer,
+            tokenPool : token_pools[x],
+            quoteTokenTransactionPool : quote_token_transaction_pool,
+            fruitBasketAuthority : fruitbasket_authority,
+            dexProgram : serum.DEX_ID,
+            tokenProgram : TOKEN_PROGRAM_ID,
+            rent : web3.SYSVAR_RENT_PUBKEY,
+          }
+        }
+      );
+
+      {
+        const amount_after_transaction = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
+        mlog.log( "index " + x + " amount_after_transaction " + amount_after_transaction );
+      }
+    }
+    //}));
+
+
   });
 
   function ComponentInfo() {
@@ -515,76 +574,4 @@ describe("fruitbasket", () => {
     this.decimal;
   }
 
-  async function CreateMarketInfo(
-    basket: web3.PublicKey,
-    markets: Market[],
-    tokens: TestToken[]
-  ) {
-    let info = [];
-    const basket_info: Basket = await program.account.basket.fetch(basket);
-    const baket_components: [BasketComponent] = basket_info.components;
-    assert.ok(tokens.length == markets.length);
-    assert.ok(tokens.length == open_orders_by_token.length);
-
-    for (let i = 0; i < 2; ++i) {
-      let index = baket_components[i].tokenIndex;
-      const token = tokens[index];
-      const market = markets[index];
-      const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(
-        market.publicKey
-      );
-      info.push({
-        isSigner: false,
-        isWritable: false,
-        pubkey: token.publicKey,
-      });
-      info.push({
-        isSigner: false,
-        isWritable: true,
-        pubkey: market.publicKey,
-      });
-      info.push({
-        isSigner: false,
-        isWritable: true,
-        pubkey: open_orders_by_token[index].publicKey,
-      });
-      info.push({
-        isSigner: false,
-        isWritable: true,
-        pubkey: market._decoded.requestQueue,
-      });
-      info.push({
-        isSigner: false,
-        isWritable: true,
-        pubkey: market._decoded.eventQueue,
-      });
-      info.push({
-        isSigner: false,
-        isWritable: true,
-        pubkey: market._decoded.bids,
-      });
-      info.push({
-        isSigner: false,
-        isWritable: true,
-        pubkey: market._decoded.asks,
-      });
-      info.push({
-        isSigner: false,
-        isWritable: true,
-        pubkey: market._decoded.baseVault,
-      });
-      info.push({
-        isSigner: false,
-        isWritable: true,
-        pubkey: market._decoded.quoteVault,
-      });
-      info.push({ isSigner: false, isWritable: false, pubkey: vault_signer });
-      info.push({
-        isSigner: false,
-        isWritable: true,
-        pubkey: token_pools[index],
-      });
-    }
-    return info;
-  }
 });

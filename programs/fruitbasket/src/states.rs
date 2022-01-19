@@ -46,6 +46,7 @@ pub struct TokenDescription
     pub token_pool : Pubkey, // pool for each token 
     pub token_decimal : u8,     // number of decimal places for token (1 SOL -> 10^9 lamports = 9 decimal places )
     pub token_open_orders : Pubkey,
+    pub market : Pubkey,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Copy)]

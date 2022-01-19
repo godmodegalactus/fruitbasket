@@ -2,14 +2,6 @@ use anchor_spl::token::Token;
 use anchor_spl::dex::serum_dex::state::OpenOrders;
 use crate::*;
 
-const FRUIT_BASKET_GROUP : &[u8] = b"fruitbasket_group";
-const FRUIT_BASKET_CACHE : &[u8] = b"fruitbasket_cache";
-const FRUIT_BASKET_AUTHORITY : &[u8] = b"fruitbasket_auth";
-const FRUIT_BASKET : &[u8] = b"fruitbasket";
-const FRUIT_BASKET_MINT : &[u8] = b"fruitbasket_mint";
-const FRUIT_BASKET_CONTEXT : &[u8] = b"fruitbasket_context";
-
-
 #[derive(Accounts)]
 #[instruction(bump_group: u8, bump_cache: u8)]
 pub struct InitializeGroup<'info> {
@@ -147,16 +139,49 @@ pub struct InitBuyBasket<'info> {
 
     pub token_program : AccountInfo<'info>,
     pub system_program : Program<'info, System>,
-    // // Basket tokens
-    // #[account(mut,
-    //             constraint = *fruit_basket_mint.to_account_info().key == basket.basket_mint )]
-    // pub fruit_basket_mint: Account<'info, Mint>,
-    
-    // pub authority : AccountInfo<'info>,
+}
 
-    // // Programs.
-    // pub dex_program: AccountInfo<'info>,
-    // pub token_program: AccountInfo<'info>,
+#[derive(Accounts)]
+pub struct ProcessTokenOnContext<'info> {
+    pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
+
+    #[account(mut)]
+    pub buy_context : AccountLoader<'info, BasketTradeContext>,
+
+    pub token_mint : Account<'info, Mint>,
+
+    pub quote_token_mint : Account<'info, Mint>,
+
+    pub fruitbasket : Box<Account<'info, Basket>>,
+    // accounts related to market and serum
+    #[account(mut)]
+    pub market: AccountInfo<'info>,
+    #[account(mut)]
+    pub open_orders: AccountInfo<'info>,
+    #[account(mut)]
+    pub request_queue: AccountInfo<'info>,
+    #[account(mut)]
+    pub event_queue: AccountInfo<'info>,
+    #[account(mut)]
+    pub bids: AccountInfo<'info>,
+    #[account(mut)]
+    pub asks: AccountInfo<'info>,
+    #[account(mut)]
+    pub token_vault: AccountInfo<'info>,
+    #[account(mut)]
+    pub quote_token_vault: AccountInfo<'info>,
+    pub vault_signer: AccountInfo<'info>,
+    // pool where all tokens are kept
+    #[account(mut)]
+    pub token_pool : AccountInfo<'info>,
+    // pool where all usdc in transaction are kept
+    #[account(mut)]
+    pub quote_token_transaction_pool : Box<Account<'info, TokenAccount>>,
+
+    pub fruit_basket_authority : AccountInfo<'info>,
+    // Programs.
+    pub dex_program: AccountInfo<'info>,
+    pub token_program: AccountInfo<'info>,
     // // Sysvars.
-    // pub rent: AccountInfo<'info>,
+    pub rent: AccountInfo<'info>,
 }
