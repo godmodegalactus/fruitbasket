@@ -98,8 +98,8 @@ impl Basket {
 }
 
 
-#[derive(AnchorSerialize, AnchorDeserialize, Copy, Clone)]
-#[repr(C)]
+#[derive(AnchorSerialize, AnchorDeserialize, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ContextSide {
     Buy,
     Sell,
@@ -108,13 +108,16 @@ pub enum ContextSide {
 #[account(zero_copy)]
 pub struct BasketTradeContext
 {
-    pub side: u8,
+    pub side: ContextSide,
     pub basket: Pubkey,
     pub reverting : u8,
+    pub amount : u64,
     pub usdc_amount_left : u64,
     pub paying_account: Pubkey,
-    pub user_basket_token_account : Pubkey,
+    pub basket_token_account : Pubkey,
     pub initial_usdc_transfer_amount : u64,
+    pub created_on : u64,
     pub token_amounts: [u64; 20],
     pub tokens_treated: [u8; 20],
 }
+

@@ -101,8 +101,11 @@ pub struct UpdateBasketPrice<'info> {
     pub cache : AccountLoader<'info, Cache>,
 }
 
+// Creates a context for buying
+// This context is used after words during token processing
+// We have to adopt this strategy as we cannot pass a lot of accounts during single call (i.e accounts related to market of all available tokens)
 #[derive(Accounts)]
-#[instruction( order_id: u8, context_bump : u8 )]
+#[instruction( order_id: u8, context_bump : u8,)]
 pub struct InitBuyBasket<'info> {
     pub group : AccountLoader<'info, FruitBasketGroup>,
 
@@ -119,9 +122,9 @@ pub struct InitBuyBasket<'info> {
     pub paying_account : Account<'info, TokenAccount>,
 
     #[account(mut,
-              constraint = user_basket_token_account.owner == *user.key,
-              constraint = user_basket_token_account.mint == basket.basket_mint, )]
-    pub user_basket_token_account : Account<'info, TokenAccount>,
+              constraint = basket_token_account.owner == *user.key,
+              constraint = basket_token_account.mint == basket.basket_mint, )]
+    pub basket_token_account : Account<'info, TokenAccount>,
 
     // USDC mint i.e which token is used to pay for the basket
     pub paying_token_mint : Account<'info, Mint>,
@@ -141,6 +144,10 @@ pub struct InitBuyBasket<'info> {
     pub system_program : Program<'info, System>,
 }
 
+// Process a token and its market for a context
+// This instruction will buy/sell a specific token in the basket.
+// token will be deposited in the pool
+// This method should be always permissionless
 #[derive(Accounts)]
 pub struct ProcessTokenOnContext<'info> {
     pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
@@ -186,7 +193,34 @@ pub struct ProcessTokenOnContext<'info> {
     pub rent: AccountInfo<'info>,
 }
 
+// Finalize and close the context
 #[derive(Accounts)]
-pub struct FinalizeContext {
-    
+pub struct FinalizeContext <'info> {
+    pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
+
+    #[account(mut, close = user)]
+    pub buy_context : AccountLoader<'info, BasketTradeContext>,
+
+    pub fruitbasket : Box<Account<'info, Basket>>,
+
+    #[account(mut,
+        constraint = quote_token_account.owner == user.key(),
+        constraint = quote_token_account.mint == quote_token_mint.key())]
+    pub quote_token_account : Account<'info, TokenAccount>,
+
+    #[account(mut,
+        constraint = basket_token_account.owner == user.key(),
+        constraint = basket_token_account.mint == fruitbasket.basket_mint)]
+    pub basket_token_account : Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub quote_token_transaction_pool : Account<'info, TokenAccount>,
+
+    pub fruit_basket_authority : AccountInfo<'info>,
+
+    pub quote_token_mint : Account<'info, Mint>,
+    pub basket_token_mint : Account<'info, Mint>,
+    pub user : AccountInfo<'info>,
+    pub token_program: AccountInfo<'info>,
+    pub system_program : Program<'info, System>,
 }

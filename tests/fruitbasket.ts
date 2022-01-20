@@ -471,7 +471,7 @@ describe("fruitbasket", () => {
       0,
       buy_context_bump,
       new anchor.BN(1000000), // buy 1 basket
-      new anchor.BN(max_price),
+      new anchor.BN(1224120000),
       {
         accounts: {
           group: frt_bsk_group,
@@ -479,7 +479,7 @@ describe("fruitbasket", () => {
           basket: basket_1,
           cache: frt_bsk_cache,
           payingAccount: client_usdc_acc,
-          userBasketTokenAccount: client_basket_token_acc,
+          basketTokenAccount: client_basket_token_acc,
           payingTokenMint: quote_token.publicKey,
           buyContext: buy_context,
           quoteTokenTransactionPool: quote_token_transaction_pool,
@@ -502,7 +502,7 @@ describe("fruitbasket", () => {
       assert.equal(buy_context_info.reverting, 0);
       assert.equal(buy_context_info.usdcAmountLeft.toNumber(), worst_basket_price);
       assert.equal(buy_context_info.payingAccount.toString(), client_usdc_acc.toString());
-      assert.equal(buy_context_info.userBasketTokenAccount.toString(), client_basket_token_acc.toString());
+      assert.equal(buy_context_info.basketTokenAccount.toString(), client_basket_token_acc.toString());
       assert.equal(buy_context_info.initialUsdcTransferAmount.toNumber(), worst_basket_price);
       for( let i = 0; i < basket_1_info.numberOfComponents; ++i)
       {
@@ -564,7 +564,7 @@ describe("fruitbasket", () => {
       assert.equal(buy_context_info.reverting, 0);
       assert.equal(buy_context_info.usdcAmountLeft.toNumber(), amount_of_usdc_in_pool.toNumber());
       assert.equal(buy_context_info.payingAccount.toString(), client_usdc_acc.toString());
-      assert.equal(buy_context_info.userBasketTokenAccount.toString(), client_basket_token_acc.toString());
+      assert.equal(buy_context_info.basketTokenAccount.toString(), client_basket_token_acc.toString());
       const basket_1_info: Basket = await program.account.basket.fetch(basket_1);
       const basket_components : [BasketComponent] = basket_1_info.components;
       for (let i = 0; i < token_list.length; ++i) {
