@@ -219,7 +219,9 @@ pub struct FinalizeContext <'info> {
     pub fruit_basket_authority : AccountInfo<'info>,
 
     pub quote_token_mint : Account<'info, Mint>,
+    #[account(mut)]
     pub basket_token_mint : Account<'info, Mint>,
+    #[account(mut)]
     pub user : AccountInfo<'info>,
     pub token_program: AccountInfo<'info>,
     pub system_program : Program<'info, System>,

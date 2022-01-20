@@ -444,13 +444,13 @@ describe("fruitbasket", () => {
       max_price.toNumber()
     );
 
-    let client_basket_token = new Token(
+    let basket_1_token = new Token(
       connection,
       basket_1_mint,
       TOKEN_PROGRAM_ID,
       owner
     );
-    client_basket_token_acc = await client_basket_token.createAccount(
+    client_basket_token_acc = await basket_1_token.createAccount(
       client_1.publicKey
     );
     const [buy_context, buy_context_bump] =
@@ -555,11 +555,11 @@ describe("fruitbasket", () => {
     }
     const amount_of_usdc_in_pool = (await quote_token.getAccountInfo(quote_token_transaction_pool)).amount;
     assert.ok(amount_of_usdc_in_pool.toNumber() < 50 * (10**6)); // less than 50 dollars left
+    const amount_of_usdc_with_client = (await quote_token.getAccountInfo(client_usdc_acc)).amount;
     
+    const buy_context_info: BasketTradeContext = await program.account.basketTradeContext.fetch(buy_context);
     // test context info after transaction
     {
-      const buy_context_info: BasketTradeContext = await program.account.basketTradeContext.fetch(buy_context);
-      
       assert.equal(buy_context_info.basket.toString(), basket_1.toString());
       assert.equal(buy_context_info.reverting, 0);
       assert.equal(buy_context_info.usdcAmountLeft.toNumber(), amount_of_usdc_in_pool.toNumber());
@@ -572,6 +572,32 @@ describe("fruitbasket", () => {
         assert.equal(buy_context_info.tokensTreated[component.tokenIndex], 1);
       }
     }
+    // finalize the trade
+    await program.rpc.finalizeContext(
+      {
+        accounts : {
+          fruitbasketGroup : frt_bsk_group,
+          buyContext : buy_context,
+          fruitbasket : basket_1,
+          quoteTokenAccount : client_usdc_acc,
+          basketTokenAccount : client_basket_token_acc,
+          quoteTokenTransactionPool : quote_token_transaction_pool,
+          fruitBasketAuthority : fruitbasket_authority,
+          quoteTokenMint : quote_token.publicKey,
+          basketTokenMint : basket_1_mint,
+          user : client_1.publicKey,
+          tokenProgram : TOKEN_PROGRAM_ID,
+          systemProgram : web3.SystemProgram.programId,
+        }
+      }
+    );
+    // remaining usdc returned back to client account
+    const amount_of_usdc_with_client_after_finalize = (await quote_token.getAccountInfo(client_usdc_acc)).amount;
+    const diff = amount_of_usdc_with_client_after_finalize.toNumber() - amount_of_usdc_with_client.toNumber();
+    assert.equal(diff, buy_context_info.usdcAmountLeft.toNumber());
+    // congratulations you are onwer of a basket
+    const amount_of_basket_tokens_with_client = (await basket_1_token.getAccountInfo(client_basket_token_acc)).amount;
+    assert.equal(amount_of_basket_tokens_with_client.toNumber(), 1000000);
   });
 
   function ComponentInfo() {
