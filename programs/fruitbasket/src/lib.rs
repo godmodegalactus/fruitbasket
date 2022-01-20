@@ -21,7 +21,6 @@ const FRUIT_BASKET_AUTHORITY : &[u8] = b"fruitbasket_auth";
 const FRUIT_BASKET : &[u8] = b"fruitbasket";
 const FRUIT_BASKET_MINT : &[u8] = b"fruitbasket_mint";
 const FRUIT_BASKET_CONTEXT : &[u8] = b"fruitbasket_context";
-const FRUIT_BASKET_USER : &[u8] = b"fruitbasket_user";
 
 mod empty {
     use super::*;
@@ -62,14 +61,15 @@ pub mod fruitbasket {
         processor::update_basket_price(ctx)
     }
 
-    pub fn init_buy_basket(
-        ctx: Context<InitBuyBasket>,
+    pub fn init_trade_context(
+        ctx: Context<InitTradeContext>,
         _order_id: u8, 
         _context_bump : u8,
+        side : ContextSide,
         amount : u64,
-        maximum_allowed_price : u64,
+        max_buy_or_min_sell_price : u64,
     ) -> ProgramResult {
-        processor::init_buy_basket(ctx, amount, maximum_allowed_price)
+        processor::init_trade_context(ctx, side, amount, max_buy_or_min_sell_price)
     }
 
     pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> ProgramResult {

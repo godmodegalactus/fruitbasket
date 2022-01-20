@@ -425,6 +425,9 @@ describe("fruitbasket", () => {
     Sell: { sell: {} },
   };
 
+  type ContextSide = anchor.IdlTypes<Fruitbasket>["ContextSide"];
+  const buy_side = ContextSide.Buy;
+  const sell_side = ContextSide.Sell;
   it("Buy Basket", async () => {
     await connection.confirmTransaction(
       await connection.requestAirdrop(
@@ -464,13 +467,14 @@ describe("fruitbasket", () => {
         programId
       );
     
-    const usdc_before_transaction : TokenAccount = await quote_token.getAccountInfo(client_usdc_acc);
+    const usdc_before_transaction = await quote_token.getAccountInfo(client_usdc_acc);
     
     usdc_before_transaction.amount
     
-    await program.rpc.initBuyBasket(
+    await program.rpc.initTradeContext(
       0,
       buy_context_bump,
+      buy_side,
       new anchor.BN(1000000), // buy 1 basket
       new anchor.BN(1224120000),
       {
@@ -479,11 +483,13 @@ describe("fruitbasket", () => {
           user: client_1.publicKey,
           basket: basket_1,
           cache: frt_bsk_cache,
-          payingAccount: client_usdc_acc,
+          quoteTokenAccount: client_usdc_acc,
           basketTokenAccount: client_basket_token_acc,
-          payingTokenMint: quote_token.publicKey,
-          buyContext: buy_context,
+          basketTokenMint : basket_1_mint,
+          quoteTokenMint: quote_token.publicKey,
+          tradeContext: buy_context,
           quoteTokenTransactionPool: quote_token_transaction_pool,
+          fruitBasketAuthority: fruitbasket_authority,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: web3.SystemProgram.programId,
         },
@@ -502,7 +508,7 @@ describe("fruitbasket", () => {
       assert.equal(buy_context_info.basket.toString(), basket_1.toString());
       assert.equal(buy_context_info.reverting, 0);
       assert.equal(buy_context_info.usdcAmountLeft.toNumber(), worst_basket_price);
-      assert.equal(buy_context_info.payingAccount.toString(), client_usdc_acc.toString());
+      assert.equal(buy_context_info.quoteTokenAccount.toString(), client_usdc_acc.toString());
       assert.equal(buy_context_info.basketTokenAccount.toString(), client_basket_token_acc.toString());
       assert.equal(buy_context_info.initialUsdcTransferAmount.toNumber(), worst_basket_price);
       for( let i = 0; i < basket_1_info.numberOfComponents; ++i)
@@ -529,9 +535,10 @@ describe("fruitbasket", () => {
         {
           accounts : {
             fruitbasketGroup : frt_bsk_group,
-            buyContext : buy_context,
+            tradeContext : buy_context,
             tokenMint : token.publicKey,
             quoteTokenMint : quote_token.publicKey,
+            basketTokenMint : basket_1_mint,
             fruitbasket : basket_1,
             market : market.publicKey,
             openOrders : open_orders_by_token[x].publicKey,
@@ -564,7 +571,7 @@ describe("fruitbasket", () => {
       assert.equal(buy_context_info.basket.toString(), basket_1.toString());
       assert.equal(buy_context_info.reverting, 0);
       assert.equal(buy_context_info.usdcAmountLeft.toNumber(), amount_of_usdc_in_pool.toNumber());
-      assert.equal(buy_context_info.payingAccount.toString(), client_usdc_acc.toString());
+      assert.equal(buy_context_info.quoteTokenAccount.toString(), client_usdc_acc.toString());
       assert.equal(buy_context_info.basketTokenAccount.toString(), client_basket_token_acc.toString());
       const basket_1_info: Basket = await program.account.basket.fetch(basket_1);
       const basket_components : [BasketComponent] = basket_1_info.components;
@@ -578,7 +585,7 @@ describe("fruitbasket", () => {
       {
         accounts : {
           fruitbasketGroup : frt_bsk_group,
-          buyContext : buy_context,
+          tradeContext : buy_context,
           fruitbasket : basket_1,
           quoteTokenAccount : client_usdc_acc,
           basketTokenAccount : client_basket_token_acc,
@@ -620,9 +627,10 @@ describe("fruitbasket", () => {
         ],
         programId
       );
-    await program.rpc.initBuyBasket(
+    await program.rpc.initTradeContext(
       0,
       buy_context_bump,
+      buy_side,
       new anchor.BN(600000), // buy 1 basket
       new anchor.BN(2024120000),
       {
@@ -631,11 +639,13 @@ describe("fruitbasket", () => {
           user: client_1.publicKey,
           basket: basket_1,
           cache: frt_bsk_cache,
-          payingAccount: client_usdc_acc,
+          quoteTokenAccount: client_usdc_acc,
           basketTokenAccount: client_basket_token_acc,
-          payingTokenMint: quote_token.publicKey,
-          buyContext: buy_context,
+          basketTokenMint : basket_1_mint,
+          quoteTokenMint: quote_token.publicKey,
+          tradeContext: buy_context,
           quoteTokenTransactionPool: quote_token_transaction_pool,
+          fruitBasketAuthority: fruitbasket_authority,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: web3.SystemProgram.programId,
         },
@@ -650,9 +660,10 @@ describe("fruitbasket", () => {
           {
             accounts : {
               fruitbasketGroup : frt_bsk_group,
-              buyContext : buy_context,
+              tradeContext : buy_context,
               tokenMint : token.publicKey,
               quoteTokenMint : quote_token.publicKey,
+              basketTokenMint : basket_1_mint,
               fruitbasket : basket_1,
               market : market.publicKey,
               openOrders : open_orders_by_token[x].publicKey,
@@ -677,7 +688,7 @@ describe("fruitbasket", () => {
         {
           accounts : {
             fruitbasketGroup : frt_bsk_group,
-            buyContext : buy_context,
+            tradeContext : buy_context,
             fruitbasket : basket_1,
             quoteTokenAccount : client_usdc_acc,
             basketTokenAccount : client_basket_token_acc,

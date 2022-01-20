@@ -113,7 +113,7 @@ pub struct BasketTradeContext
     pub reverting : u8,
     pub amount : u64,
     pub usdc_amount_left : u64,
-    pub paying_account: Pubkey,
+    pub quote_token_account: Pubkey,
     pub basket_token_account : Pubkey,
     pub initial_usdc_transfer_amount : u64,
     pub created_on : u64,

@@ -1,5 +1,3 @@
-use fixed::traits::Fixed;
-
 use crate::*;
 use anchor_spl::dex::serum_dex::matching::{OrderType, Side};
 use std::ops::Div;
@@ -162,46 +160,74 @@ pub fn update_basket_price(ctx : Context<UpdateBasketPrice>) -> ProgramResult{
 }
 
 
-pub fn init_buy_basket(
-    ctx: Context<InitBuyBasket>,
+pub fn init_trade_context(
+    ctx: Context<InitTradeContext>,
+    side: ContextSide,
     amount : u64,
-    maximum_allowed_price : u64,
+    max_buy_or_min_sell_price : u64,
 ) -> ProgramResult {
     
     let group = ctx.accounts.group.load()?;
     let basket = &ctx.accounts.basket;
-    let mut buy_context = ctx.accounts.buy_context.load_init()?;
+    let mut trade_context = ctx.accounts.trade_context.load_init()?;
+    let is_buy_side = side == ContextSide::Buy;
 
     // price after taking into account the confidence
-    let possible_last_basket_price : u64 = basket.last_price + basket.confidence;
-    let mut worst_case_price =  possible_last_basket_price + possible_last_basket_price.div(10);
+    let possible_last_basket_price : u64 = 
+        if is_buy_side { 
+            basket.last_price + basket.confidence 
+        } else {
+            basket.last_price - basket.confidence
+        };
+    let mut worst_case_price = 
+        if is_buy_side {
+            possible_last_basket_price + possible_last_basket_price.div(10)
+        } else {
+            possible_last_basket_price - possible_last_basket_price.div(10)
+        };
     // maximum allowed price should be greater than current basket price plus the confidence of the price.
-    msg!(&maximum_allowed_price.to_string()[..]);
-    msg!(&possible_last_basket_price.to_string()[..]);
-    assert!(maximum_allowed_price > possible_last_basket_price);
-    // largest maximum price allowed is 10% of possible_last_basket_price
-    worst_case_price = if maximum_allowed_price > worst_case_price { worst_case_price } else { maximum_allowed_price };
+    if is_buy_side {
+        assert!(max_buy_or_min_sell_price > possible_last_basket_price);
+        // largest maximum price allowed is 10% of possible_last_basket_price
+        worst_case_price = if max_buy_or_min_sell_price > worst_case_price { worst_case_price } else { max_buy_or_min_sell_price };
 
-    assert!(ctx.accounts.quote_token_transaction_pool.key() == group.quote_token_transaction_pool);
+        assert!(ctx.accounts.quote_token_transaction_pool.key() == group.quote_token_transaction_pool);
 
-    // transfer usdc from client to pool account
-    let accounts = token::Transfer {
-        from: ctx.accounts.paying_account.to_account_info().clone(),
-        to: ctx.accounts.quote_token_transaction_pool.to_account_info().clone(),
-        authority: ctx.accounts.user.to_account_info(),
-    };
-    let transfer_ctx = CpiContext::new(ctx.accounts.token_program.clone(), accounts);
-    token::transfer( transfer_ctx, worst_case_price)?;
+        // transfer usdc from client to pool account
+        let accounts = token::Transfer {
+            from: ctx.accounts.quote_token_account.to_account_info().clone(),
+            to: ctx.accounts.quote_token_transaction_pool.to_account_info().clone(),
+            authority: ctx.accounts.user.to_account_info(),
+        };
+        let transfer_ctx = CpiContext::new(ctx.accounts.token_program.clone(), accounts);
+        token::transfer( transfer_ctx, worst_case_price)?;
+    }
+    else {
+        assert!(max_buy_or_min_sell_price < possible_last_basket_price);
+        let (authority, bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
+        assert_eq!(authority, ctx.accounts.fruit_basket_authority.key());
+        let seeds = &[&FRUIT_BASKET_AUTHORITY[..], &[bump]];
+        let signer = &[&seeds[..]];
 
-    buy_context.side = ContextSide::Buy;
-    buy_context.basket = basket.key();
-    buy_context.reverting = 0;
-    buy_context.usdc_amount_left = worst_case_price;
-    buy_context.amount = amount;
-    buy_context.paying_account = ctx.accounts.paying_account.key();
-    buy_context.basket_token_account = ctx.accounts.basket_token_account.key();
-    buy_context.initial_usdc_transfer_amount = worst_case_price;
-    buy_context.tokens_treated = [1; MAX_NB_TOKENS];
+        let cpi_accounts = token::Burn {
+            mint: ctx.accounts.basket_token_mint.to_account_info(),
+            to: ctx.accounts.basket_token_account.to_account_info(),
+            authority: ctx.accounts.user.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+        token::burn(cpi_ctx, amount)?;
+    }
+    
+    trade_context.side = side;
+    trade_context.basket = basket.key();
+    trade_context.reverting = 0;
+    trade_context.usdc_amount_left = if is_buy_side { worst_case_price } else { 0 };
+    trade_context.amount = amount;
+    trade_context.quote_token_account = ctx.accounts.quote_token_account.key();
+    trade_context.basket_token_account = ctx.accounts.basket_token_account.key();
+    trade_context.initial_usdc_transfer_amount = trade_context.usdc_amount_left;
+    trade_context.tokens_treated = [1; MAX_NB_TOKENS];
 
     for component_index in 0..basket.number_of_components {
         let component : &BasketComponentDescription = &basket.components[component_index as usize];
@@ -209,7 +235,7 @@ pub fn init_buy_basket(
         let position = component.token_index as usize;
 
         // check if we found the token mint in our token list
-        buy_context.tokens_treated[position] = 0;
+        trade_context.tokens_treated[position] = 0;
 
         // calculate amount of tokens to transfer
         let amount_of_tokens = (amount as u128)
@@ -218,11 +244,11 @@ pub fn init_buy_basket(
                                             .checked_mul(10u128.pow(token.token_decimal.into())).unwrap()
                                             .checked_div(10u128.pow(component.decimal.into())).unwrap();
         
-        buy_context.token_amounts[position] = amount_of_tokens as u64;   
+        trade_context.token_amounts[position] = amount_of_tokens as u64;   
     }
     // set a timestamp on the context.
     let clock = Clock::get()?;
-    buy_context.created_on = clock.unix_timestamp as u64;
+    trade_context.created_on = clock.unix_timestamp as u64;
     Ok(())
 }
 
@@ -239,17 +265,17 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     {
         return Ok(());
     }
-    let mut buy_context = ctx.accounts.buy_context.load_mut()?;
-
+    let mut trade_context = ctx.accounts.trade_context.load_mut()?;
+    let is_buy_side = trade_context.side == ContextSide::Buy;
     // checks to verify if we are in right context
-    assert_eq!(fruitbasket.key(), buy_context.basket); // same basketS
-    assert_eq!(buy_context.tokens_treated[token_index], 0); // check if the token is not already treated
+    assert_eq!(fruitbasket.key(), trade_context.basket); // same basketS
+    assert_eq!(trade_context.tokens_treated[token_index], 0); // check if the token is not already treated
 
     let (pda, bump) =
         Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
     assert_eq!(ctx.accounts.fruit_basket_authority.key(), pda);
     let seeds = &[&FRUIT_BASKET_AUTHORITY[..], &[bump]];
-    let side : Side = Side::Bid;
+    let side : Side = if is_buy_side { Side::Bid } else { Side::Ask };
     let market = &ctx.accounts.market;
     let dex_program = &ctx.accounts.dex_program;
     // create new order
@@ -258,7 +284,7 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     {
         let max_coin_qty = {
             let market_state = MarketState::load(market, dex_program.key)?;
-            buy_context.token_amounts[token_index].checked_div(market_state.coin_lot_size).unwrap()
+            trade_context.token_amounts[token_index].checked_div(market_state.coin_lot_size).unwrap()
         };
         let new_orders = dex::NewOrderV3 {
             market: market.clone(),
@@ -275,12 +301,14 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
             rent: ctx.accounts.rent.clone(),
         };
         let ctx_orders = CpiContext::new(dex_program.clone(), new_orders);
+        let limit_price = if is_buy_side { u64::MAX } else { 1 };
+        let max_native_token = if is_buy_side { trade_context.usdc_amount_left } else { u64::MAX };
         dex::new_order_v3(
             ctx_orders.with_signer(&[seeds]),
             side,
-            NonZeroU64::new(u64::MAX).unwrap(),
+            NonZeroU64::new(limit_price).unwrap(),
             NonZeroU64::new(max_coin_qty).unwrap(),
-            NonZeroU64::new(buy_context.usdc_amount_left).unwrap(),
+            NonZeroU64::new(max_native_token).unwrap(),
             SelfTradeBehavior::DecrementTake,
             OrderType::ImmediateOrCancel,
             client_order_id,
@@ -313,28 +341,33 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     }
     let value_after_transaction = token::accessor::amount(quote_token_transaction_pool)?;
 
-    buy_context.tokens_treated[token_index] = 1;
-    buy_context.usdc_amount_left -= value_before_transaction - value_after_transaction;
+    trade_context.tokens_treated[token_index] = 1;
+    
+    trade_context.usdc_amount_left = if is_buy_side {
+        trade_context.usdc_amount_left - (value_before_transaction - value_after_transaction)
+    } else {
+        trade_context.usdc_amount_left + (value_after_transaction - value_before_transaction)
+    };
     Ok(())
 }
 
 pub fn finalize_context(ctx : Context<FinalizeContext>) -> ProgramResult {
     let basket_group = ctx.accounts.fruitbasket_group.load()?;
-    let buy_context = ctx.accounts.buy_context.load_mut()?;
+    let trade_context = ctx.accounts.trade_context.load_mut()?;
     // check if all tokens are treated
     for i in 0..basket_group.token_count {
-        assert_eq!(buy_context.tokens_treated[i as usize], 1);
+        assert_eq!(trade_context.tokens_treated[i as usize], 1);
     }
     // some more checks
-    assert!( buy_context.basket == ctx.accounts.fruitbasket.key() );
-    assert!( buy_context.paying_account == ctx.accounts.quote_token_account.key() );
-    assert!( buy_context.basket_token_account == ctx.accounts.basket_token_account.key() );
+    assert!( trade_context.basket == ctx.accounts.fruitbasket.key() );
+    assert!( trade_context.quote_token_account == ctx.accounts.quote_token_account.key() );
+    assert!( trade_context.basket_token_account == ctx.accounts.basket_token_account.key() );
     let (authority, bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
     assert_eq!(authority, ctx.accounts.fruit_basket_authority.key());
     let seeds = [&FRUIT_BASKET_AUTHORITY[..], &[bump]];
     let signer = &[&seeds[..]];
 
-    if buy_context.side == ContextSide::Buy {
+    if trade_context.side == ContextSide::Buy {
         // buy side
         let cpi_accounts = token::MintTo {
             mint: ctx.accounts.basket_token_mint.to_account_info(),
@@ -343,23 +376,19 @@ pub fn finalize_context(ctx : Context<FinalizeContext>) -> ProgramResult {
         };
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-        token::mint_to(cpi_ctx, buy_context.amount)?;
-
-        // transfer remaining usdc back to client
-        if buy_context.usdc_amount_left > 0{ 
-            let accounts = token::Transfer {
-                from: ctx.accounts.quote_token_transaction_pool.to_account_info().clone(),
-                to: ctx.accounts.quote_token_account.to_account_info().clone(),
-                authority:  ctx.accounts.fruit_basket_authority.clone(),
-            };
-            let transfer_ctx = CpiContext::new_with_signer(ctx.accounts.token_program.clone(), accounts, signer);
-            token::transfer( transfer_ctx, buy_context.usdc_amount_left)?;
-        }
+        token::mint_to(cpi_ctx, trade_context.amount)?;
     }
-    else {
-        assert!(false);
+    // transfer remaining usdc back to client for buy context
+    // transfer result usdc back to client for sell context
+    if trade_context.usdc_amount_left > 0 { 
+        let accounts = token::Transfer {
+            from: ctx.accounts.quote_token_transaction_pool.to_account_info().clone(),
+            to: ctx.accounts.quote_token_account.to_account_info().clone(),
+            authority:  ctx.accounts.fruit_basket_authority.clone(),
+        };
+        let transfer_ctx = CpiContext::new_with_signer(ctx.accounts.token_program.clone(), accounts, signer);
+        token::transfer( transfer_ctx, trade_context.usdc_amount_left)?;
     }
-
     Ok(())
 }
 

@@ -106,7 +106,7 @@ pub struct UpdateBasketPrice<'info> {
 // We have to adopt this strategy as we cannot pass a lot of accounts during single call (i.e accounts related to market of all available tokens)
 #[derive(Accounts)]
 #[instruction( order_id: u8, context_bump : u8,)]
-pub struct InitBuyBasket<'info> {
+pub struct InitTradeContext<'info> {
     pub group : AccountLoader<'info, FruitBasketGroup>,
 
     #[account(signer, mut)]
@@ -116,29 +116,36 @@ pub struct InitBuyBasket<'info> {
     
     pub cache : AccountLoader<'info, Cache>,
 
+    // user quote token account i.e usdc account
     #[account(mut,
-                constraint = paying_account.owner == *user.key,
-                constraint = paying_account.mint == *paying_token_mint.to_account_info().key)]
-    pub paying_account : Account<'info, TokenAccount>,
+                constraint = quote_token_account.owner == *user.key,
+                constraint = quote_token_account.mint == *quote_token_mint.to_account_info().key)]
+    pub quote_token_account : Account<'info, TokenAccount>,
 
+    // basket token account belonging to the user
     #[account(mut,
               constraint = basket_token_account.owner == *user.key,
               constraint = basket_token_account.mint == basket.basket_mint, )]
     pub basket_token_account : Account<'info, TokenAccount>,
 
     // USDC mint i.e which token is used to pay for the basket
-    pub paying_token_mint : Account<'info, Mint>,
+    pub quote_token_mint : Account<'info, Mint>,
+
+    // basket mint
+    pub basket_token_mint : Account<'info, Mint>,
     
+    // creates a trade context to be processed by all underlying tokens
     #[account(init,
                 seeds = [FRUIT_BASKET_CONTEXT, &user.key.to_bytes(), &[order_id]],
                 bump = context_bump,
                 payer = user,
                 space = 8 + size_of::<BasketTradeContext>(),
             )]
-    pub buy_context : AccountLoader<'info, BasketTradeContext>,
+    pub trade_context : AccountLoader<'info, BasketTradeContext>,
 
     #[account(mut)]
-    pub quote_token_transaction_pool : Box<Account<'info, TokenAccount>>,
+    pub quote_token_transaction_pool : Account<'info, TokenAccount>,
+    pub fruit_basket_authority : AccountInfo<'info>,
 
     pub token_program : AccountInfo<'info>,
     pub system_program : Program<'info, System>,
@@ -153,11 +160,13 @@ pub struct ProcessTokenOnContext<'info> {
     pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
 
     #[account(mut)]
-    pub buy_context : AccountLoader<'info, BasketTradeContext>,
+    pub trade_context : AccountLoader<'info, BasketTradeContext>,
 
     pub token_mint : Account<'info, Mint>,
 
     pub quote_token_mint : Account<'info, Mint>,
+    #[account(mut)]
+    pub basket_token_mint : Account<'info, Mint>,
 
     pub fruitbasket : Box<Account<'info, Basket>>,
     // accounts related to market and serum
@@ -181,7 +190,7 @@ pub struct ProcessTokenOnContext<'info> {
     // pool where all tokens are kept
     #[account(mut)]
     pub token_pool : AccountInfo<'info>,
-    // pool where all usdc in transaction are kept
+    // pool where all usdc in transaction are kept belonging baskets
     #[account(mut)]
     pub quote_token_transaction_pool : Box<Account<'info, TokenAccount>>,
 
@@ -199,7 +208,7 @@ pub struct FinalizeContext <'info> {
     pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
 
     #[account(mut, close = user)]
-    pub buy_context : AccountLoader<'info, BasketTradeContext>,
+    pub trade_context : AccountLoader<'info, BasketTradeContext>,
 
     pub fruitbasket : Box<Account<'info, Basket>>,
 
