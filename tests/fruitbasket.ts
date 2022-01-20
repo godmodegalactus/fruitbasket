@@ -417,6 +417,7 @@ describe("fruitbasket", () => {
   let client_1 = web3.Keypair.generate();
   let client_usdc_acc: web3.PublicKey;
   let client_basket_token_acc: web3.PublicKey;
+  let basket_1_token : Token;
 
   type BasketTradeContext = anchor.IdlAccounts<Fruitbasket>["basketTradeContext"];
   const ContextSide = {
@@ -444,7 +445,7 @@ describe("fruitbasket", () => {
       max_price.toNumber()
     );
 
-    let basket_1_token = new Token(
+     basket_1_token = new Token(
       connection,
       basket_1_mint,
       TOKEN_PROGRAM_ID,
@@ -598,6 +599,107 @@ describe("fruitbasket", () => {
     // congratulations you are onwer of a basket
     const amount_of_basket_tokens_with_client = (await basket_1_token.getAccountInfo(client_basket_token_acc)).amount;
     assert.equal(amount_of_basket_tokens_with_client.toNumber(), 1000000);
+
+    
+    const amount_of_btc_in_pool = (await (await btc).getAccountInfo(token_pools[0])).amount;
+    const amount_of_eth_in_pool = (await (await eth).getAccountInfo(token_pools[1])).amount;
+    const amount_of_sol_in_pool = (await (await sol).getAccountInfo(token_pools[2])).amount;
+    assert.equal(10000, amount_of_btc_in_pool.toNumber());
+    assert.equal(100000, amount_of_eth_in_pool.toNumber());
+    assert.equal(2000000000, amount_of_sol_in_pool.toNumber());
+  });
+
+  it("Buy some more baskets", async() => {
+    // buy and finalize more basket 1
+    const [buy_context, buy_context_bump] =
+      await web3.PublicKey.findProgramAddress(
+        [
+          Buffer.from("fruitbasket_context"),
+          client_1.publicKey.toBuffer(),
+          Buffer.from([0]),
+        ],
+        programId
+      );
+    await program.rpc.initBuyBasket(
+      0,
+      buy_context_bump,
+      new anchor.BN(600000), // buy 1 basket
+      new anchor.BN(2024120000),
+      {
+        accounts: {
+          group: frt_bsk_group,
+          user: client_1.publicKey,
+          basket: basket_1,
+          cache: frt_bsk_cache,
+          payingAccount: client_usdc_acc,
+          basketTokenAccount: client_basket_token_acc,
+          payingTokenMint: quote_token.publicKey,
+          buyContext: buy_context,
+          quoteTokenTransactionPool: quote_token_transaction_pool,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: web3.SystemProgram.programId,
+        },
+        signers: [client_1],
+      });
+      // process all the transactionswa
+      await Promise.all(Array.from(Array(tokens.length).keys()).map( async(x) => {
+        const token = await tokens[x];
+        const market = markets_by_tokens[x];
+        const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(market.publicKey);
+        await program.rpc.processTokenForContext(
+          {
+            accounts : {
+              fruitbasketGroup : frt_bsk_group,
+              buyContext : buy_context,
+              tokenMint : token.publicKey,
+              quoteTokenMint : quote_token.publicKey,
+              fruitbasket : basket_1,
+              market : market.publicKey,
+              openOrders : open_orders_by_token[x].publicKey,
+              requestQueue : market._decoded.requestQueue,
+              eventQueue : market._decoded.eventQueue,
+              bids : market._decoded.bids,
+              asks: market._decoded.asks,
+              tokenVault: market._decoded.baseVault,
+              quoteTokenVault : market._decoded.quoteVault,
+              vaultSigner : vault_signer,
+              tokenPool : token_pools[x],
+              quoteTokenTransactionPool : quote_token_transaction_pool,
+              fruitBasketAuthority : fruitbasket_authority,
+              dexProgram : serum.DEX_ID,
+              tokenProgram : TOKEN_PROGRAM_ID,
+              rent : web3.SYSVAR_RENT_PUBKEY,
+            }
+          }
+        );
+      }));
+      await program.rpc.finalizeContext(
+        {
+          accounts : {
+            fruitbasketGroup : frt_bsk_group,
+            buyContext : buy_context,
+            fruitbasket : basket_1,
+            quoteTokenAccount : client_usdc_acc,
+            basketTokenAccount : client_basket_token_acc,
+            quoteTokenTransactionPool : quote_token_transaction_pool,
+            fruitBasketAuthority : fruitbasket_authority,
+            quoteTokenMint : quote_token.publicKey,
+            basketTokenMint : basket_1_mint,
+            user : client_1.publicKey,
+            tokenProgram : TOKEN_PROGRAM_ID,
+            systemProgram : web3.SystemProgram.programId,
+          }
+        }
+      );
+      const amount_of_basket_tokens_with_client = (await basket_1_token.getAccountInfo(client_basket_token_acc)).amount;
+      assert.equal(amount_of_basket_tokens_with_client.toNumber(), 1600000);
+      const amount_of_btc_in_pool = (await (await btc).getAccountInfo(token_pools[0])).amount;
+      const amount_of_eth_in_pool = (await (await eth).getAccountInfo(token_pools[1])).amount;
+      const amount_of_sol_in_pool = (await (await sol).getAccountInfo(token_pools[2])).amount;
+      assert.equal(16000, amount_of_btc_in_pool.toNumber());
+      assert.equal(160000, amount_of_eth_in_pool.toNumber());
+      assert.equal(3200000000, amount_of_sol_in_pool.toNumber());
+      assert.equal();
   });
 
   function ComponentInfo() {

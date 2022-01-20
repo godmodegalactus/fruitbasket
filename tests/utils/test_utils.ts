@@ -309,8 +309,6 @@ export class TestToken extends Token {
         }
 
         const one_unit = new u64(10).pow(new u64(this.decimals));
-        const value = amount.mul(one_unit);
-
         return amount.mul(one_unit);
     }
 }

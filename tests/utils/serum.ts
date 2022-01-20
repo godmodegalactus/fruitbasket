@@ -142,6 +142,19 @@ export class SerumUtils {
         const asks = MarketMaker.makeOrders([[marketPrice * 1.005, 2]]);
 
         await marketMaker.placeOrders(market, bids, asks);
+
+        const marketMaker_2 = await this.createMarketMaker(
+            1 * LAMPORTS_PER_SOL,
+            [
+                [baseToken, baseToken.amount(100000)],
+                [quoteToken, quoteToken.amount(marketPrice * 100)],
+            ]
+        );
+
+        const bids_2 = MarketMaker.makeOrders([[marketPrice * 0.990, 3]]);
+        const asks_2 = MarketMaker.makeOrders([[marketPrice * 1.01, 3]]);
+
+        await marketMaker_2.placeOrders(market, bids_2, asks_2);
         return market;
     }
 
