@@ -283,10 +283,11 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let token_pool = &ctx.accounts.token_pool.to_account_info();
     let value_before_transaction = token::accessor::amount(quote_token_transaction_pool)?;
     let tokens_before_transaction = token::accessor::amount(token_pool)?;
+    let token_amount = trade_context.token_amounts[token_index];
     {
         let max_coin_qty = {
             let market_state = MarketState::load(market, dex_program.key)?;
-            trade_context.token_amounts[token_index].checked_div(market_state.coin_lot_size).unwrap()
+            token_amount.checked_div(market_state.coin_lot_size).unwrap()
         };
         let new_orders = dex::NewOrderV3 {
             market: market.clone(),
@@ -351,9 +352,9 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     }
     // check if trade has been really done
     if is_buy_side {
-        assert_eq!( tokens_after_transaction - tokens_before_transaction,  trade_context.token_amounts[token_index]);
+        assert_eq!( tokens_after_transaction - tokens_before_transaction,  token_amount);
     } else {
-        assert_eq!( tokens_before_transaction - tokens_after_transaction,  trade_context.token_amounts[token_index]);
+        assert_eq!( tokens_before_transaction - tokens_after_transaction,  token_amount);
     }
 
     trade_context.tokens_treated[token_index] = 1;
