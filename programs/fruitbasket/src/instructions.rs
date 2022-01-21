@@ -1,7 +1,9 @@
 use anchor_spl::token::Token;
 use anchor_spl::dex::serum_dex::state::OpenOrders;
 use crate::*;
-
+/// Initialize Group
+/// To initialize a group i.e inital data for the market
+/// This should be done only by owner of the market
 #[derive(Accounts)]
 #[instruction(bump_group: u8, bump_cache: u8)]
 pub struct InitializeGroup<'info> {
@@ -32,6 +34,8 @@ pub struct InitializeGroup<'info> {
     pub token_program : AccountInfo<'info>,
 }
 
+/// Add Token ->  to add new token to the market.
+/// To add a token we need to know the market and pyth price and product keys
 #[derive(Accounts)]
 pub struct AddToken<'info>{
     #[account(signer)]
@@ -57,6 +61,10 @@ pub struct AddToken<'info>{
     pub rent : AccountInfo<'info>,
 }
 
+/// Add basket -> To create a new basket.
+/// Need to pass all tokens and amounts by instruction
+/// This will create a basket key and a basket mint key
+/// Basket mint are special mint for each basket that will be minted when you buy a basket
 #[derive(Accounts)]
 #[instruction(basket_number : u8, basket_bump : u8, basket_mint_bump : u8)]
 pub struct AddBasket<'info> {
@@ -85,6 +93,7 @@ pub struct AddBasket<'info> {
     pub rent : Sysvar<'info, Rent>,
 }
 
+// Permissionless instruction which should be called to update price in cache
 #[derive(Accounts)]
 pub struct UpdatePrice<'info> {
     pub group : AccountLoader<'info, FruitBasketGroup>,
@@ -93,6 +102,7 @@ pub struct UpdatePrice<'info> {
     pub oracle_ai : AccountInfo<'info>,
 }
 
+// permissionless instruction which should be called to update the basket price from the cache
 #[derive(Accounts)]
 pub struct UpdateBasketPrice<'info> {
     #[account(mut)]
@@ -101,9 +111,13 @@ pub struct UpdateBasketPrice<'info> {
     pub cache : AccountLoader<'info, Cache>,
 }
 
-// Creates a context for buying
-// This context is used after words during token processing
-// We have to adopt this strategy as we cannot pass a lot of accounts during single call (i.e accounts related to market of all available tokens)
+/// Creates a context for a basket trade {buying, selling}
+/// To trade a basket we have to first create a trade context using this instruction. 
+/// Then use the address of context and process it for each token in the basket.
+/// After processing every token you have to use FinalizeContext to finish the trade.
+/// USDC/BasketTokens will be taken during the init phase and swap will be done during finalize phase.
+/// Only init context should require a signer.
+/// We have to adopt this strategy as we cannot pass a lot of accounts during single call (i.e accounts related to market of all available tokens)
 #[derive(Accounts)]
 #[instruction( order_id: u8, context_bump : u8,)]
 pub struct InitTradeContext<'info> {
@@ -152,10 +166,10 @@ pub struct InitTradeContext<'info> {
     pub system_program : Program<'info, System>,
 }
 
-// Process a token and its market for a context
-// This instruction will buy/sell a specific token in the basket.
-// token will be deposited in the pool
-// This method should be always permissionless
+/// Process a token and its market for a context
+/// This instruction will buy/sell a specific token in the basket.
+/// token will be deposited/taken in/from the pools
+/// This method should be always permissionless
 #[derive(Accounts)]
 pub struct ProcessTokenOnContext<'info> {
     pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
@@ -203,7 +217,10 @@ pub struct ProcessTokenOnContext<'info> {
     pub rent: AccountInfo<'info>,
 }
 
-// Finalize and close the context
+/// Finalize and close the context
+/// Verify all tokens have been treated.
+/// Do all required check and give either baskettoken or usdc to the user
+/// context rent returned to the user
 #[derive(Accounts)]
 pub struct FinalizeContext <'info> {
     pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
