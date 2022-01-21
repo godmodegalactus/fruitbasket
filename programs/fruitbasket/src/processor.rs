@@ -280,7 +280,9 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let dex_program = &ctx.accounts.dex_program;
     // create new order
     let quote_token_transaction_pool = &ctx.accounts.quote_token_transaction_pool.to_account_info();
+    let token_pool = &ctx.accounts.token_pool.to_account_info();
     let value_before_transaction = token::accessor::amount(quote_token_transaction_pool)?;
+    let tokens_before_transaction = token::accessor::amount(token_pool)?;
     {
         let max_coin_qty = {
             let market_state = MarketState::load(market, dex_program.key)?;
@@ -293,7 +295,7 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
             event_queue: ctx.accounts.event_queue.clone(),
             market_bids: ctx.accounts.bids.clone(),
             market_asks: ctx.accounts.asks.clone(),
-            order_payer_token_account: quote_token_transaction_pool.clone(),
+            order_payer_token_account: if is_buy_side { quote_token_transaction_pool.clone() } else { token_pool.clone() },
             open_orders_authority: ctx.accounts.fruit_basket_authority.clone(),
             coin_vault: ctx.accounts.token_vault.clone(),
             pc_vault: ctx.accounts.quote_token_vault.clone(),
@@ -315,31 +317,44 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
             limit,
         )?;
     }
+    let tokens_during_transaction = token::accessor::amount(token_pool)?;
+    {
+        let msg = format!("tokens during transaction : {}", tokens_during_transaction);
+        msg!(&msg[..]);
+    }
     // settle transaction
     {
-        let token_pool = &ctx.accounts.token_pool.to_account_info();
-        let value_before_buying = token::accessor::amount(token_pool)?;
-        
         let settle_accs = dex::SettleFunds {
             market: ctx.accounts.market.clone(),
             open_orders: ctx.accounts.open_orders.clone(),
             open_orders_authority: ctx.accounts.fruit_basket_authority.clone(),
             coin_vault: ctx.accounts.token_vault.clone(),
             pc_vault: ctx.accounts.quote_token_vault.clone(),
-            coin_wallet: token_pool.to_account_info().clone(),
-            pc_wallet: ctx.accounts.quote_token_transaction_pool.to_account_info().clone(),
+            coin_wallet: token_pool.clone(),
+            pc_wallet: quote_token_transaction_pool.clone(),
             vault_signer: ctx.accounts.vault_signer.clone(),
             token_program: ctx.accounts.token_program.clone(),
         };
         let settle_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), settle_accs);
         dex::settle_funds(settle_ctx.with_signer(&[seeds]))?;
-        let value_after_buying = token::accessor::amount(token_pool)?;
-        {
-            let msg = format!("tokens got {}", value_after_buying - value_before_buying );
-            msg!(&msg[..]);
-        }
     }
     let value_after_transaction = token::accessor::amount(quote_token_transaction_pool)?;
+
+    let tokens_after_transaction = token::accessor::amount(token_pool)?;
+    {
+        let msg = format!("tokens after transaction : {}", tokens_after_transaction);
+        msg!(&msg[..]);
+    }
+    {
+        let msg = format!("usdc transfered : {}", value_after_transaction - value_before_transaction);
+        msg!(&msg[..]);
+    }
+    // check if trade has been really done
+    if is_buy_side {
+        assert_eq!( tokens_after_transaction - tokens_before_transaction,  trade_context.token_amounts[token_index]);
+    } else {
+        assert_eq!( tokens_before_transaction - tokens_after_transaction,  trade_context.token_amounts[token_index]);
+    }
 
     trade_context.tokens_treated[token_index] = 1;
     

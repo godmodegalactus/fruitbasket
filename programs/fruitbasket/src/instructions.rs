@@ -132,6 +132,7 @@ pub struct InitTradeContext<'info> {
     pub quote_token_mint : Account<'info, Mint>,
 
     // basket mint
+    #[account(mut, constraint = basket.basket_mint == basket_token_mint.key(),)]
     pub basket_token_mint : Account<'info, Mint>,
     
     // creates a trade context to be processed by all underlying tokens
