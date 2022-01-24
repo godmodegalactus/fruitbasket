@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use std::io::Write as IoWrite;
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("FkVPe3KrRE18jXFq4P5CADUSd5YoWiJukBYsxpm2wyB8");
 
 #[program]
 pub mod writer_utils {

@@ -20,8 +20,10 @@ import mlog from "mocha-logger";
 import { assert } from "chai";
 import { TestToken, TestUtils } from "./utils/test_utils";
 import { TokenAccount } from "@blockworks-foundation/mango-client";
+import * as fs from 'fs';
 
 type Connection = web3.Connection;
+
 
 describe("fruitbasket", () => {
   // Configure the client to use the local cluster.
@@ -33,15 +35,14 @@ describe("fruitbasket", () => {
   const program = anchor.workspace.Fruitbasket as Program<Fruitbasket>;
   type FruitBasketGroup = anchor.IdlAccounts<Fruitbasket>["fruitBasketGroup"];
   type Basket = anchor.IdlAccounts<Fruitbasket>["basket"];
-  type BasketComponent =
-    anchor.IdlTypes<Fruitbasket>["BasketComponentDescription"];
+  type BasketComponent = anchor.IdlTypes<Fruitbasket>["BasketComponentDescription"];
 
   const owner = web3.Keypair.generate();
   const test_utils = new TestUtils(provider.connection, provider.wallet);
   let serum_utils = new serum.SerumUtils(test_utils);
   let oracle = new pyth.Pyth(connection, wallet);
   const programId = program.programId;
-
+  mlog.log("program id :  " + program.programId);
   // create some tokens
   const usdc = test_utils.createToken(6, wallet.publicKey);
   const btc = test_utils.createToken(6, wallet.publicKey);
@@ -55,7 +56,7 @@ describe("fruitbasket", () => {
   let quote_token: TestToken;
   let tokens = [btc, eth, sol, srm, mngo, shit1, shit2];
   const nb_tokens = tokens.length;
-  let token_names = ["BTC", "ETH", "SOL", "SRM", "MNGO", "SHIT1", "SHIT2"];
+  let token_names = ["BTC", "ETH", "SOL", "SRM", "MNGO", "GRAPH", "ATLAS"];
   let token_prices = [
     40000000000n,
     4000000000n,
@@ -74,6 +75,7 @@ describe("fruitbasket", () => {
   it("Market intialized", async () => {
     let t = await Promise.all(tokens);
     quote_token = await usdc;
+
     markets_by_tokens = await Promise.all(
       Array.from(Array(t.length).keys()).map((x) => {
         const marketPrice = Number(token_prices[x]) * (10**token_exp[x]);
@@ -103,9 +105,7 @@ describe("fruitbasket", () => {
       );
     }
 
-    for (let i = 0; i < nb_tokens; ++i) {
-      await Promise.all(oracle_promises);
-    }
+    const oracles = await Promise.all(oracle_promises);
   });
 
   let frt_bsk_group = null;
@@ -130,6 +130,7 @@ describe("fruitbasket", () => {
         [Buffer.from("fruitbasket_auth")],
         programId
       );
+
     const [tmp_group, bump_grp] = await web3.PublicKey.findProgramAddress(
       [Buffer.from("fruitbasket_group"), owner.publicKey.toBuffer()],
       program.programId
@@ -146,6 +147,7 @@ describe("fruitbasket", () => {
     quote_token_transaction_pool = await quote_token.createAccount(
       owner.publicKey
     );
+    mlog.log("quote_token_transaction_pool : " + quote_token_transaction_pool);
     await program.rpc.initializeGroup(bump_grp, bump_cache, "USDC", {
       accounts: {
         owner: owner.publicKey,
@@ -174,6 +176,9 @@ describe("fruitbasket", () => {
     token_pools = await Promise.all(
       token_list.map(async (x) => x.createAccount(owner.publicKey))
     );
+
+
+
     let markets = markets_by_tokens;
     for (let index = 0; index < nb_tokens; ++index) {
       let marketKey = markets[index].publicKey;
@@ -204,6 +209,8 @@ describe("fruitbasket", () => {
   let basket_1_mint: web3.PublicKey;
   let basket_2_mint: web3.PublicKey;
   let basket_3_mint: web3.PublicKey;
+  const basket_names = ["First tier coins", "Solana coins", "Small coins"];
+  const basket_desc = ["Basket for first tier coins", "Basket for coins derived from solana", "Basket for coins that have potential in future"];
 
   it("Baskets created ", async () => {
     const exp = 1000000;
@@ -234,12 +241,12 @@ describe("fruitbasket", () => {
 
     let comp_sh1 = new ComponentInfo();
     comp_sh1.tokenIndex = 5;
-    comp_sh1.amount = new anchor.BN(exp * 10000); // 10000 SHIT1
+    comp_sh1.amount = new anchor.BN(exp * 10000); // 10000 GRAPH
     comp_sh1.decimal = 6;
 
     let comp_sh2 = new ComponentInfo();
     comp_sh2.tokenIndex = 6;
-    comp_sh2.amount = new anchor.BN(exp * 100000); // 100000 SHIT1
+    comp_sh2.amount = new anchor.BN(exp * 10000); // 10000 ATLAS
     comp_sh2.decimal = 6;
 
     // first basket
@@ -260,8 +267,8 @@ describe("fruitbasket", () => {
       basket_nb,
       bump_b1,
       bump_b1m,
-      "First tier coins",
-      "Basket for first teer coins",
+      basket_names[0],
+      basket_desc[0],
       components_1,
       {
         accounts: {
@@ -295,8 +302,8 @@ describe("fruitbasket", () => {
       basket_nb,
       bump_b2,
       bump_b2m,
-      "Solana coins",
-      "Basket for coins base on solana",
+      basket_names[1],
+      basket_desc[1],
       components_2,
       {
         accounts: {
@@ -330,8 +337,8 @@ describe("fruitbasket", () => {
       basket_nb,
       bump_b3,
       bump_b3m,
-      "Shit coins",
-      "Basket for shit coins that have potential in future",
+      basket_names[2],
+      basket_desc[2],
       components_3,
       {
         accounts: {
@@ -806,6 +813,61 @@ describe("fruitbasket", () => {
       assert.equal(7000, amount_of_btc_in_pool.toNumber());
       assert.equal(70000, amount_of_eth_in_pool.toNumber());
       assert.equal(1400000, amount_of_sol_in_pool.toNumber());
+
+      const token_data = await Promise.all( Array.from(Array(tokens.length).keys()).map( async(x) => {
+        const market = markets_by_tokens[x];
+        const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(market.publicKey);
+        return {
+          name : token_names[x],
+          mint_address : (await tokens[x]).publicKey.toString(),
+          market_address : markets_by_tokens[x].publicKey.toString(),
+          price_oracle : (await price_oracles[x]).publicKey.toString(),
+          product_oracle : (await produce_oracles[x]).publicKey.toString(),
+          pools : token_pools[x].toString(),
+          openOrders : open_orders_by_token[x].publicKey.toString(),
+          requestQueue : market._decoded.requestQueue.toString(),
+          eventQueue : market._decoded.eventQueue.toString(),
+          bids : market._decoded.bids.toString(),
+          asks: market._decoded.asks.toString(),
+          tokenVault: market._decoded.baseVault.toString(),
+          quoteTokenVault : market._decoded.quoteVault.toString(),
+          vaultSigner : vault_signer.toString(),
+        }
+      }));
+
+      const data = {
+        group : frt_bsk_group.toString(),
+        cache : frt_bsk_cache.toString(),
+        quote_token_name : "USDC",
+        quote_token_mint : quote_token.publicKey.toString(),
+        quote_token_transaction_pool : quote_token_transaction_pool.toString(),
+        fruitbasket_authority : fruitbasket_authority.toString(),
+        tokens : token_data,
+        baskets : [{
+          name : basket_names[0],
+          desc : basket_desc[0],
+          basket_address : basket_1.toString(),
+          basket_mint_address : basket_1_mint.toString(),
+          basket_components : [ {name : "BTC", amount : 0.01}, {name: "ETH", amount : 0.1}, {name: "SOL", amount:2.0} ],
+        },
+        {
+          name : basket_names[1],
+          desc : basket_desc[1],
+          basket_address : basket_2.toString(),
+          basket_mint_address : basket_2_mint.toString(),
+          basket_components : [ {name : "SOL", amount : 2.0}, {name: "SRM", amount : 100}, {name: "MNGO", amount:1000} ],
+        },
+        {
+          name : basket_names[2],
+          desc : basket_desc[2],
+          basket_address : basket_3.toString(),
+          basket_mint_address : basket_3_mint.toString(),
+          basket_components : [ {name : "GRAPH", amount : 10000.0}, {name: "ATLAS", amount : 10000.0}, ],
+        },]
+      };
+
+      let json = JSON.stringify(data);
+      fs.writeFileSync('data.json', json);
   });
 
   function ComponentInfo() {

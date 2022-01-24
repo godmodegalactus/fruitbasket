@@ -1,5 +1,6 @@
 [programs.localnet]
-fruitbasket = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+fruitbasket = "H5Bzc1FGnatrsFZC18WN1BoKduvwHdTiPuiQWEWv8Pi4"
+writer_utils = "FkVPe3KrRE18jXFq4P5CADUSd5YoWiJukBYsxpm2wyB8"
 
 [registry]
 url = "https://anchor.projectserum.com"
@@ -7,6 +8,10 @@ url = "https://anchor.projectserum.com"
 [provider]
 cluster = "localnet"
 wallet = "/home/prat/.config/solana/id.json"
+
+[clusters.localnet]
+fruitbasket = "H5Bzc1FGnatrsFZC18WN1BoKduvwHdTiPuiQWEWv8Pi4"
+writer_utils = "FkVPe3KrRE18jXFq4P5CADUSd5YoWiJukBYsxpm2wyB8"
 
 [[test.genesis]]
 address = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"

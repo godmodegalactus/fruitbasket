@@ -12,7 +12,7 @@ use states::*;
 mod processor;
 
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("H5Bzc1FGnatrsFZC18WN1BoKduvwHdTiPuiQWEWv8Pi4");
 const MAX_NB_TOKENS : usize = 20;
 const MAX_NB_COMPONENTS: usize = 10;
 const FRUIT_BASKET_GROUP : &[u8] = b"fruitbasket_group";
