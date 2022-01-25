@@ -130,31 +130,49 @@ export class SerumUtils {
             quoteLotSize: 100,
             feeRateBps: 0,
         });
-        const marketMaker = await this.createMarketMaker(
-            1 * LAMPORTS_PER_SOL,
-            [
-                [baseToken, baseToken.amount(100000)],
-                [quoteToken, quoteToken.amount(marketPrice * 100)],
-            ]
-        );
+        let nb = Math.floor(40000/marketPrice);
+        mlog.log("nb : " + nb);
+        {
+            
+            const marketMaker = await this.createMarketMaker(
+                1 * LAMPORTS_PER_SOL,
+                [
+                    [baseToken, baseToken.amount(nb * 10)],
+                    [quoteToken, quoteToken.amount(40000000)],
+                ]
+            );
+            const bids = MarketMaker.makeOrders([[marketPrice * 0.995, nb]]);
+            const asks = MarketMaker.makeOrders([[marketPrice * 1.005, nb]]);
 
-        const bids = MarketMaker.makeOrders([[marketPrice * 0.995, 2]]);
-        const asks = MarketMaker.makeOrders([[marketPrice * 1.005, 2]]);
+            await marketMaker.placeOrders(market, bids, asks);
+        }
+        {
+            const marketMaker = await this.createMarketMaker(
+                1 * LAMPORTS_PER_SOL,
+                [
+                    [baseToken, baseToken.amount(nb * 10)],
+                    [quoteToken, quoteToken.amount(40000000)],
+                ]
+            );
+            const bids = MarketMaker.makeOrders([[marketPrice * 0.994, nb]]);
+            const asks = MarketMaker.makeOrders([[marketPrice * 1.006, nb]]);
 
-        await marketMaker.placeOrders(market, bids, asks);
+            await marketMaker.placeOrders(market, bids, asks);
+        }
 
-        const marketMaker_2 = await this.createMarketMaker(
-            1 * LAMPORTS_PER_SOL,
-            [
-                [baseToken, baseToken.amount(100000)],
-                [quoteToken, quoteToken.amount(marketPrice * 100)],
-            ]
-        );
+        {
+            const marketMaker = await this.createMarketMaker(
+                100 * LAMPORTS_PER_SOL,
+                [
+                    [baseToken, baseToken.amount(nb * 10)],
+                    [quoteToken, quoteToken.amount(40000000)],
+                ]
+            );
+            const bids = MarketMaker.makeOrders([[marketPrice * 0.992, nb]]);
+            const asks = MarketMaker.makeOrders([[marketPrice * 1.008, nb]]);
 
-        const bids_2 = MarketMaker.makeOrders([[marketPrice * 0.990, 3]]);
-        const asks_2 = MarketMaker.makeOrders([[marketPrice * 1.01, 3]]);
-
-        await marketMaker_2.placeOrders(market, bids_2, asks_2);
+            await marketMaker.placeOrders(market, bids, asks);
+        }
         return market;
     }
 
@@ -243,8 +261,8 @@ export class MarketMaker {
                         side: "sell",
                         price: entry.price,
                         size: entry.size,
-                        orderType: "postOnly",
-                        selfTradeBehavior: "abortTransaction",
+                        orderType: "limit",
+                        selfTradeBehavior: "decrementTake",
                         ...placeOrderDefaultParams,
                     }
                 );
@@ -261,8 +279,8 @@ export class MarketMaker {
                         side: "buy",
                         price: entry.price,
                         size: entry.size,
-                        orderType: "postOnly",
-                        selfTradeBehavior: "abortTransaction",
+                        orderType: "limit",
+                        selfTradeBehavior: "decrementTake",
                         ...placeOrderDefaultParams,
                     }
                 );

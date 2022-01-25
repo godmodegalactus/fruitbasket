@@ -175,15 +175,15 @@ pub fn init_trade_context(
     // price after taking into account the confidence
     let possible_last_basket_price : u64 = 
         if is_buy_side { 
-            basket.last_price + basket.confidence 
+            basket.last_price.checked_add( basket.confidence ).unwrap()
         } else {
-            basket.last_price - basket.confidence
+            basket.last_price.checked_sub( basket.confidence ).unwrap()
         };
     let mut worst_case_price = 
         if is_buy_side {
-            possible_last_basket_price + possible_last_basket_price.div(10)
+            possible_last_basket_price.checked_add(possible_last_basket_price.checked_div(10).unwrap()).unwrap()
         } else {
-            possible_last_basket_price - possible_last_basket_price.div(10)
+            possible_last_basket_price.checked_sub(possible_last_basket_price.checked_div(10).unwrap()).unwrap()
         };
     // maximum allowed price should be greater than current basket price plus the confidence of the price.
     if is_buy_side {
@@ -261,15 +261,21 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let token_index = _token_index.unwrap();
     let fruitbasket = &ctx.accounts.fruitbasket;
     let _component_in_basket = fruitbasket.components.iter().position(|x| (x.token_index as usize) == token_index);
+    // check if token is part of the basket
     if _component_in_basket == None 
     {
         return Ok(());
     }
+    
     let mut trade_context = ctx.accounts.trade_context.load_mut()?;
+
+    // check if token is already treated
+    if trade_context.tokens_treated[token_index] == 1{
+        return Ok(());
+    }
     let is_buy_side = trade_context.side == ContextSide::Buy;
     // checks to verify if we are in right context
-    assert_eq!(fruitbasket.key(), trade_context.basket); // same basketS
-    assert_eq!(trade_context.tokens_treated[token_index], 0); // check if the token is not already treated
+    assert_eq!(fruitbasket.key(), trade_context.basket); // same baskets
 
     let (pda, bump) =
         Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
@@ -284,9 +290,12 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let value_before_transaction = token::accessor::amount(quote_token_transaction_pool)?;
     let tokens_before_transaction = token::accessor::amount(token_pool)?;
     let token_amount = trade_context.token_amounts[token_index];
+    let mut lot_size = 1;
+    // Create a new order on serum
     {
         let max_coin_qty = {
             let market_state = MarketState::load(market, dex_program.key)?;
+            lot_size = market_state.coin_lot_size;
             token_amount.checked_div(market_state.coin_lot_size).unwrap()
         };
         let new_orders = dex::NewOrderV3 {
@@ -304,6 +313,7 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
             rent: ctx.accounts.rent.clone(),
         };
         let ctx_orders = CpiContext::new(dex_program.clone(), new_orders);
+        // TODO Decide limit price and native token price more approriately.
         let limit_price = if is_buy_side { u64::MAX } else { 1 };
         let max_native_token = if is_buy_side { trade_context.usdc_amount_left } else { u64::MAX };
         dex::new_order_v3(
@@ -318,12 +328,7 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
             limit,
         )?;
     }
-    let tokens_during_transaction = token::accessor::amount(token_pool)?;
-    {
-        let msg = format!("tokens during transaction : {}", tokens_during_transaction);
-        msg!(&msg[..]);
-    }
-    // settle transaction
+    // settle order on serum
     {
         let settle_accs = dex::SettleFunds {
             market: ctx.accounts.market.clone(),
@@ -342,27 +347,25 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let value_after_transaction = token::accessor::amount(quote_token_transaction_pool)?;
 
     let tokens_after_transaction = token::accessor::amount(token_pool)?;
-    {
-        let msg = format!("tokens after transaction : {}", tokens_after_transaction);
-        msg!(&msg[..]);
-    }
-    {
-        let msg = format!("usdc transfered : {}", value_after_transaction - value_before_transaction);
-        msg!(&msg[..]);
-    }
-    // check if trade has been really done
+    // check how many tokens were really transfered. If all tokens were not transfered we have to redo the process
     if is_buy_side {
-        assert_eq!( tokens_after_transaction - tokens_before_transaction,  token_amount);
-    } else {
-        assert_eq!( tokens_before_transaction - tokens_after_transaction,  token_amount);
+        let tokens_transfered = tokens_after_transaction.checked_sub(tokens_before_transaction).unwrap();
+        trade_context.token_amounts[token_index] = token_amount.checked_sub(tokens_transfered).unwrap();
+        if trade_context.token_amounts[token_index] < lot_size {
+            trade_context.tokens_treated[token_index] = 1;
+        }
     }
-
-    trade_context.tokens_treated[token_index] = 1;
-    
+    else {
+        let tokens_transfered = tokens_before_transaction.checked_sub(tokens_after_transaction).unwrap();
+        trade_context.token_amounts[token_index] = token_amount.checked_sub(tokens_transfered).unwrap();
+        if trade_context.token_amounts[token_index] < lot_size {
+            trade_context.tokens_treated[token_index] = 1;
+        }
+    }
     trade_context.usdc_amount_left = if is_buy_side {
-        trade_context.usdc_amount_left - (value_before_transaction - value_after_transaction)
+        trade_context.usdc_amount_left.checked_sub(value_before_transaction.checked_sub(value_after_transaction).unwrap()).unwrap()
     } else {
-        trade_context.usdc_amount_left + (value_after_transaction - value_before_transaction)
+        trade_context.usdc_amount_left.checked_add(value_after_transaction.checked_sub(value_before_transaction).unwrap()).unwrap()
     };
     Ok(())
 }
