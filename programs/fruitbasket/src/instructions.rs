@@ -1,5 +1,3 @@
-use anchor_spl::token::Token;
-use anchor_spl::dex::serum_dex::state::OpenOrders;
 use crate::*;
 /// Initialize Group
 /// To initialize a group i.e inital data for the market

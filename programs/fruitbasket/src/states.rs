@@ -108,6 +108,7 @@ pub enum ContextSide {
 #[account(zero_copy)]
 pub struct BasketTradeContext
 {
+    pub magic : u32,
     pub side: ContextSide,
     pub basket: Pubkey,
     pub reverting : u8,
@@ -121,3 +122,4 @@ pub struct BasketTradeContext
     pub tokens_treated: [u8; 20],
 }
 
+pub const BASKET_TRADE_CONTEXT_MAGIC : u32 = 0xba873cfd;

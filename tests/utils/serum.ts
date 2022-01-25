@@ -131,7 +131,6 @@ export class SerumUtils {
             feeRateBps: 0,
         });
         let nb = Math.floor(40000/marketPrice);
-        mlog.log("nb : " + nb);
         {
             
             const marketMaker = await this.createMarketMaker(

@@ -1,6 +1,5 @@
 use crate::*;
 use anchor_spl::dex::serum_dex::matching::{OrderType, Side};
-use std::ops::Div;
 use std::{num::NonZeroU64};
 use anchor_spl::dex::serum_dex::instruction::SelfTradeBehavior;
 use anchor_spl::dex::serum_dex::state::{ MarketState };
@@ -179,6 +178,7 @@ pub fn init_trade_context(
         } else {
             basket.last_price.checked_sub( basket.confidence ).unwrap()
         };
+    // we assume that the max worst case price is 10 percent of the actual price
     let mut worst_case_price = 
         if is_buy_side {
             possible_last_basket_price.checked_add(possible_last_basket_price.checked_div(10).unwrap()).unwrap()
@@ -203,6 +203,7 @@ pub fn init_trade_context(
         token::transfer( transfer_ctx, worst_case_price)?;
     }
     else {
+        // burn the tokens which user wants to sell.
         assert!(max_buy_or_min_sell_price < possible_last_basket_price);
         let (authority, bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
         assert_eq!(authority, ctx.accounts.fruit_basket_authority.key());
@@ -218,7 +219,8 @@ pub fn init_trade_context(
         let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
         token::burn(cpi_ctx, amount)?;
     }
-    
+    // update trade context
+    trade_context.magic = BASKET_TRADE_CONTEXT_MAGIC;
     trade_context.side = side;
     trade_context.basket = basket.key();
     trade_context.reverting = 0;
@@ -253,8 +255,6 @@ pub fn init_trade_context(
 }
 
 pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> ProgramResult {
-    let client_order_id = 0;
-    let limit = 65535;
     let basket_group = ctx.accounts.fruitbasket_group.load()?;
     let _token_index = basket_group.token_description.iter().position(|x| x.token_mint == ctx.accounts.token_mint.key());
     assert_ne!(_token_index, None);
@@ -277,75 +277,34 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     // checks to verify if we are in right context
     assert_eq!(fruitbasket.key(), trade_context.basket); // same baskets
 
+    // get authority bump and verify authority
     let (pda, bump) =
         Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
     assert_eq!(ctx.accounts.fruit_basket_authority.key(), pda);
+
     let seeds = &[&FRUIT_BASKET_AUTHORITY[..], &[bump]];
+    // set side
     let side : Side = if is_buy_side { Side::Bid } else { Side::Ask };
-    let market = &ctx.accounts.market;
-    let dex_program = &ctx.accounts.dex_program;
     // create new order
     let quote_token_transaction_pool = &ctx.accounts.quote_token_transaction_pool.to_account_info();
     let token_pool = &ctx.accounts.token_pool.to_account_info();
+
+    let token_amount = trade_context.token_amounts[token_index];
+    let (lot_size ,max_coin_qty ) = {
+        let market_state = MarketState::load(&ctx.accounts.market, ctx.accounts.dex_program.key)?;
+        (market_state.coin_lot_size, token_amount.checked_div(market_state.coin_lot_size).unwrap())
+    };
+    let max_native_token = if is_buy_side {trade_context.usdc_amount_left} else {u64::MAX};
+
+    // get value before transaction
     let value_before_transaction = token::accessor::amount(quote_token_transaction_pool)?;
     let tokens_before_transaction = token::accessor::amount(token_pool)?;
-    let token_amount = trade_context.token_amounts[token_index];
-    let mut lot_size = 1;
     // Create a new order on serum
-    {
-        let max_coin_qty = {
-            let market_state = MarketState::load(market, dex_program.key)?;
-            lot_size = market_state.coin_lot_size;
-            token_amount.checked_div(market_state.coin_lot_size).unwrap()
-        };
-        let new_orders = dex::NewOrderV3 {
-            market: market.clone(),
-            open_orders: ctx.accounts.open_orders.clone(),
-            request_queue: ctx.accounts.request_queue.clone(),
-            event_queue: ctx.accounts.event_queue.clone(),
-            market_bids: ctx.accounts.bids.clone(),
-            market_asks: ctx.accounts.asks.clone(),
-            order_payer_token_account: if is_buy_side { quote_token_transaction_pool.clone() } else { token_pool.clone() },
-            open_orders_authority: ctx.accounts.fruit_basket_authority.clone(),
-            coin_vault: ctx.accounts.token_vault.clone(),
-            pc_vault: ctx.accounts.quote_token_vault.clone(),
-            token_program: ctx.accounts.token_program.clone(),
-            rent: ctx.accounts.rent.clone(),
-        };
-        let ctx_orders = CpiContext::new(dex_program.clone(), new_orders);
-        // TODO Decide limit price and native token price more approriately.
-        let limit_price = if is_buy_side { u64::MAX } else { 1 };
-        let max_native_token = if is_buy_side { trade_context.usdc_amount_left } else { u64::MAX };
-        dex::new_order_v3(
-            ctx_orders.with_signer(&[seeds]),
-            side,
-            NonZeroU64::new(limit_price).unwrap(),
-            NonZeroU64::new(max_coin_qty).unwrap(),
-            NonZeroU64::new(max_native_token).unwrap(),
-            SelfTradeBehavior::DecrementTake,
-            OrderType::ImmediateOrCancel,
-            client_order_id,
-            limit,
-        )?;
-    }
+    ctx.accounts.create_new_order(side, max_coin_qty, max_native_token, &[seeds])?;
     // settle order on serum
-    {
-        let settle_accs = dex::SettleFunds {
-            market: ctx.accounts.market.clone(),
-            open_orders: ctx.accounts.open_orders.clone(),
-            open_orders_authority: ctx.accounts.fruit_basket_authority.clone(),
-            coin_vault: ctx.accounts.token_vault.clone(),
-            pc_vault: ctx.accounts.quote_token_vault.clone(),
-            coin_wallet: token_pool.clone(),
-            pc_wallet: quote_token_transaction_pool.clone(),
-            vault_signer: ctx.accounts.vault_signer.clone(),
-            token_program: ctx.accounts.token_program.clone(),
-        };
-        let settle_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), settle_accs);
-        dex::settle_funds(settle_ctx.with_signer(&[seeds]))?;
-    }
-    let value_after_transaction = token::accessor::amount(quote_token_transaction_pool)?;
+    ctx.accounts.settle_accounts(&[seeds])?;
 
+    let value_after_transaction = token::accessor::amount(quote_token_transaction_pool)?;
     let tokens_after_transaction = token::accessor::amount(token_pool)?;
     // check how many tokens were really transfered. If all tokens were not transfered we have to redo the process
     if is_buy_side {
@@ -426,4 +385,61 @@ fn change_authority<'info>(acc : &AccountInfo<'info>,
         cpi = cpi.with_signer(signer_seeds);
     }
     token::set_authority( cpi,  AuthorityType::AccountOwner, Some(to))
+}
+
+impl<'info> ProcessTokenOnContext<'info>{
+    fn create_new_order(&self, 
+                        side:Side, 
+                        max_coin_qty: u64, 
+                        max_native_token : u64,
+                        seeds:&[&[&[u8]]]) -> ProgramResult {
+        let is_buy_side = side == Side::Bid;
+        let client_order_id = 0;
+        let limit = 65535;
+        let new_orders = dex::NewOrderV3 {
+            market: self.market.clone(),
+            open_orders: self.open_orders.clone(),
+            request_queue: self.request_queue.clone(),
+            event_queue: self.event_queue.clone(),
+            market_bids: self.bids.clone(),
+            market_asks: self.asks.clone(),
+            order_payer_token_account: if is_buy_side { self.quote_token_transaction_pool.to_account_info().clone() } else { self.token_pool.clone() },
+            open_orders_authority: self.fruit_basket_authority.clone(),
+            coin_vault: self.token_vault.clone(),
+            pc_vault: self.quote_token_vault.clone(),
+            token_program: self.token_program.clone(),
+            rent: self.rent.clone(),
+        };
+        let ctx_orders = CpiContext::new(self.dex_program.clone(), new_orders);
+        // TODO Decide limit price and native token price more approriately.
+        let limit_price = if is_buy_side { u64::MAX } else { 1 };
+        dex::new_order_v3(
+            ctx_orders.with_signer(seeds),
+            side,
+            NonZeroU64::new(limit_price).unwrap(),
+            NonZeroU64::new(max_coin_qty).unwrap(),
+            NonZeroU64::new(max_native_token).unwrap(),
+            SelfTradeBehavior::DecrementTake,
+            OrderType::ImmediateOrCancel,
+            client_order_id,
+            limit,
+        )
+    }
+
+    fn settle_accounts(&self,
+                        seeds : &[&[&[u8]]]) -> ProgramResult {
+        let settle_accs = dex::SettleFunds {
+            market: self.market.clone(),
+            open_orders: self.open_orders.clone(),
+            open_orders_authority: self.fruit_basket_authority.clone(),
+            coin_vault: self.token_vault.clone(),
+            pc_vault: self.quote_token_vault.clone(),
+            coin_wallet: self.token_pool.clone(),
+            pc_wallet: self.quote_token_transaction_pool.to_account_info().clone(),
+            vault_signer: self.vault_signer.clone(),
+            token_program: self.token_program.clone(),
+        };
+        let settle_ctx = CpiContext::new(self.dex_program.clone(), settle_accs);
+        dex::settle_funds(settle_ctx.with_signer(seeds))
+    }
 }
