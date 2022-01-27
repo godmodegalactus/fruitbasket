@@ -108,17 +108,24 @@ pub enum ContextSide {
 #[account(zero_copy)]
 pub struct BasketTradeContext
 {
+    // to find current trade context which are bieng processed by offchain programs.
     pub magic : u32,
     pub side: ContextSide,
     pub basket: Pubkey,
     pub reverting : u8,
+    // amount of basket tokens
     pub amount : u64,
+    // tracks usdc used
     pub usdc_amount_left : u64,
     pub quote_token_account: Pubkey,
     pub basket_token_account : Pubkey,
+    // contains number of usdc deposited by user
     pub initial_usdc_transfer_amount : u64,
     pub created_on : u64,
+    // tracks number of tokens to be treated
     pub token_amounts: [u64; 20],
+    // initial amount of tokens to be transfered
+    pub initial_token_amounts: [u64; 20],
     pub tokens_treated: [u8; 20],
 }
 

@@ -4,6 +4,7 @@ use std::{num::NonZeroU64};
 use anchor_spl::dex::serum_dex::instruction::SelfTradeBehavior;
 use anchor_spl::dex::serum_dex::state::{ MarketState };
 use solana_program::sysvar::clock::Clock;
+use core::cell::RefMut;
 
 pub fn initialize_group(
     ctx: Context<InitializeGroup>,
@@ -247,6 +248,7 @@ pub fn init_trade_context(
                                             .checked_div(10u128.pow(component.decimal.into())).unwrap();
         
         trade_context.token_amounts[position] = amount_of_tokens as u64;   
+        trade_context.initial_token_amounts[position] = trade_context.token_amounts[position];
     }
     // set a timestamp on the context.
     let clock = Clock::get()?;
@@ -261,7 +263,7 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let token_index = _token_index.unwrap();
     let fruitbasket = &ctx.accounts.fruitbasket;
     let _component_in_basket = fruitbasket.components.iter().position(|x| (x.token_index as usize) == token_index);
-    // check if token is part of the basket
+    // check if token is component of the basket
     if _component_in_basket == None 
     {
         return Ok(());
@@ -270,10 +272,12 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let mut trade_context = ctx.accounts.trade_context.load_mut()?;
 
     // check if token is already treated
-    if trade_context.tokens_treated[token_index] == 1{
+    if trade_context.tokens_treated[token_index] == 1 {
         return Ok(());
     }
-    let is_buy_side = trade_context.side == ContextSide::Buy;
+    let is_buy_side = ( trade_context.side == ContextSide::Buy && trade_context.reverting == 0) // check if buy while not reverting
+                            || ( trade_context.side == ContextSide::Sell && trade_context.reverting == 1); // check if sell if reverting
+
     // checks to verify if we are in right context
     assert_eq!(fruitbasket.key(), trade_context.basket); // same baskets
 
@@ -330,8 +334,8 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
 }
 
 pub fn finalize_context(ctx : Context<FinalizeContext>) -> ProgramResult {
-    let basket_group = ctx.accounts.fruitbasket_group.load()?;
     let trade_context = ctx.accounts.trade_context.load_mut()?;
+    let basket_group = ctx.accounts.fruitbasket_group.load()?;
     // check if all tokens are treated
     for i in 0..basket_group.token_count {
         assert_eq!(trade_context.tokens_treated[i as usize], 1);
@@ -344,6 +348,10 @@ pub fn finalize_context(ctx : Context<FinalizeContext>) -> ProgramResult {
     assert_eq!(authority, ctx.accounts.fruit_basket_authority.key());
     let seeds = [&FRUIT_BASKET_AUTHORITY[..], &[bump]];
     let signer = &[&seeds[..]];
+
+    if trade_context.reverting == 1 {
+        return finalize_for_revert_context(&ctx, trade_context, signer);
+    }
 
     if trade_context.side == ContextSide::Buy {
         // buy side
@@ -366,6 +374,70 @@ pub fn finalize_context(ctx : Context<FinalizeContext>) -> ProgramResult {
         };
         let transfer_ctx = CpiContext::new_with_signer(ctx.accounts.token_program.clone(), accounts, signer);
         token::transfer( transfer_ctx, trade_context.usdc_amount_left)?;
+    }
+    Ok(())
+}
+
+pub fn finalize_for_revert_context<'info>(ctx : &Context<FinalizeContext>,
+                                            trade_context : RefMut<BasketTradeContext>,
+                                            signer : &[&[&[u8]]]) -> ProgramResult {
+    if trade_context.side == ContextSide::Buy {
+        // user was trying to buy the context and the transaction was reverted mostly due to failure.
+        // So we give back user the original amount
+        let accounts = token::Transfer {
+            from: ctx.accounts.quote_token_transaction_pool.to_account_info().clone(),
+            to: ctx.accounts.quote_token_account.to_account_info().clone(),
+            authority:  ctx.accounts.fruit_basket_authority.clone(),
+        };
+        let transfer_ctx = CpiContext::new_with_signer(ctx.accounts.token_program.clone(), accounts, signer);
+        token::transfer( transfer_ctx, trade_context.initial_usdc_transfer_amount)?;
+    }
+    else {
+        // user tried to sell the tokens but the transaction failed.
+        // So we will mint token back to the user
+        let cpi_accounts = token::MintTo {
+            mint: ctx.accounts.basket_token_mint.to_account_info(),
+            to: ctx.accounts.basket_token_account.to_account_info(),
+            authority: ctx.accounts.fruit_basket_authority.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+        token::mint_to(cpi_ctx, trade_context.amount)?;
+    }
+    
+    Ok(())
+}
+
+pub fn revert_trade_context( ctx: Context<RevertTradeContext> ) -> ProgramResult {
+    let mut trade_context = ctx.accounts.trade_context.load_mut()?;
+    // check if trade is already reverting
+    if trade_context.reverting == 1 {
+        return Ok(())
+    }
+    trade_context.reverting = 1;
+    let basket = &ctx.accounts.fruitbasket;
+    for index in 0..basket.number_of_components {
+        let token_index = index as usize;
+        if trade_context.tokens_treated[token_index] == 1 {
+            trade_context.tokens_treated[token_index] = 0;
+            trade_context.token_amounts[token_index] = trade_context.initial_token_amounts[token_index];
+        } else {
+            // token has not been processed yet.
+            if trade_context.token_amounts[token_index] == trade_context.initial_token_amounts[token_index] {
+                trade_context.tokens_treated[token_index] = 1;
+            }
+            else {
+                // update the token count that should be processed
+                trade_context.token_amounts[token_index] = trade_context.initial_token_amounts[token_index].checked_sub(trade_context.token_amounts[token_index]).unwrap();
+            }
+        }
+    }
+    // update usdc amount left
+    // TODO smarter way to decide these token amounts
+    if trade_context.side == ContextSide::Buy {
+        trade_context.usdc_amount_left = 0;
+    } else  {
+        trade_context.usdc_amount_left = token::accessor::amount(&ctx.accounts.quote_token_transaction_pool)?;
     }
     Ok(())
 }

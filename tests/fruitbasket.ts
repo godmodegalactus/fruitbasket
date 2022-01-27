@@ -441,7 +441,7 @@ describe("fruitbasket", () => {
     let max_price = new anchor.BN(10 ** 10);
     client_usdc_acc = await quote_token.createAccount(client_1.publicKey);
     // deposit some usdc
-    quote_token.mintTo(
+    await quote_token.mintTo(
       client_usdc_acc,
       wallet.publicKey,
       [test_utils.payer()],
@@ -631,7 +631,7 @@ describe("fruitbasket", () => {
       0,
       buy_context_bump,
       buy_side,
-      new anchor.BN(600000), // buy 1 basket
+      new anchor.BN(600000), // buy 0.6 basket
       new anchor.BN(2024120000),
       {
         accounts: {
@@ -806,6 +806,321 @@ describe("fruitbasket", () => {
       assert.equal(7000, amount_of_btc_in_pool.toNumber());
       assert.equal(70000, amount_of_eth_in_pool.toNumber());
       assert.equal(1400000, amount_of_sol_in_pool.toNumber());
+  });
+
+  it("Revert context tested for buy context", async() => {
+    // for reverting context we need a fund insurance to offset difference between spread
+    // add some usdc as an insurance in usdc token pool
+    quote_token.mintTo(
+      quote_token_transaction_pool,
+      wallet.publicKey,
+      [test_utils.payer()],
+      100_000_000 // 100 USDC
+    );
+    const amount_of_basket_tokens_with_client_before = (await basket_1_token.getAccountInfo(client_basket_token_acc)).amount;
+    const amount_of_usdc_with_client_before = (await quote_token.getAccountInfo(client_usdc_acc)).amount;
+    const amount_of_btc_in_pool_before = (await (await btc).getAccountInfo(token_pools[0])).amount;
+    const amount_of_eth_in_pool_before = (await (await eth).getAccountInfo(token_pools[1])).amount;
+    const amount_of_sol_in_pool_before = (await (await sol).getAccountInfo(token_pools[2])).amount;
+
+    // Initiate a buy context that is to be reverted
+    const [buy_context, buy_context_bump] =
+      await web3.PublicKey.findProgramAddress(
+        [
+          Buffer.from("fruitbasket_context"),
+          client_1.publicKey.toBuffer(),
+          Buffer.from([0]),
+        ],
+        programId
+      );
+    await program.rpc.initTradeContext(
+      0,
+      buy_context_bump,
+      buy_side,
+      new anchor.BN(1000000), // buy 1 basket
+      new anchor.BN(2024120000),
+      {
+        accounts: {
+          group: frt_bsk_group,
+          user: client_1.publicKey,
+          basket: basket_1,
+          cache: frt_bsk_cache,
+          quoteTokenAccount: client_usdc_acc,
+          basketTokenAccount: client_basket_token_acc,
+          basketTokenMint : basket_1_mint,
+          quoteTokenMint: quote_token.publicKey,
+          tradeContext: buy_context,
+          quoteTokenTransactionPool: quote_token_transaction_pool,
+          fruitBasketAuthority: fruitbasket_authority,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: web3.SystemProgram.programId,
+        },
+        signers: [client_1],
+      });
+      // partially process tokens / process only BTC and ETH not SOL
+      await Promise.all(Array.from(Array(2).keys()).map( async(x) => {
+        const token = await tokens[x];
+        const market = markets_by_tokens[x];
+        const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(market.publicKey);
+        await program.rpc.processTokenForContext(
+          {
+            accounts : {
+              fruitbasketGroup : frt_bsk_group,
+              tradeContext : buy_context,
+              tokenMint : token.publicKey,
+              quoteTokenMint : quote_token.publicKey,
+              basketTokenMint : basket_1_mint,
+              fruitbasket : basket_1,
+              market : market.publicKey,
+              openOrders : open_orders_by_token[x].publicKey,
+              requestQueue : market._decoded.requestQueue,
+              eventQueue : market._decoded.eventQueue,
+              bids : market._decoded.bids,
+              asks: market._decoded.asks,
+              tokenVault: market._decoded.baseVault,
+              quoteTokenVault : market._decoded.quoteVault,
+              vaultSigner : vault_signer,
+              tokenPool : token_pools[x],
+              quoteTokenTransactionPool : quote_token_transaction_pool,
+              fruitBasketAuthority : fruitbasket_authority,
+              dexProgram : serum.DEX_ID,
+              tokenProgram : TOKEN_PROGRAM_ID,
+              rent : web3.SYSVAR_RENT_PUBKEY,
+            }
+          }
+        );
+      }));
+
+      // Initiate revert for buy context
+      program.rpc.revertTradeContext(
+        {
+          accounts : {
+            fruitbasket : basket_1,
+            tradeContext : buy_context,
+            quoteTokenTransactionPool : quote_token_transaction_pool,
+          }
+        }
+      );
+      // process all tokens for revert context
+      await Promise.all(Array.from(Array(3).keys()).map( async(x) => {
+        const token = await tokens[x];
+        const market = markets_by_tokens[x];
+        const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(market.publicKey);
+        await program.rpc.processTokenForContext(
+          {
+            accounts : {
+              fruitbasketGroup : frt_bsk_group,
+              tradeContext : buy_context,
+              tokenMint : token.publicKey,
+              quoteTokenMint : quote_token.publicKey,
+              basketTokenMint : basket_1_mint,
+              fruitbasket : basket_1,
+              market : market.publicKey,
+              openOrders : open_orders_by_token[x].publicKey,
+              requestQueue : market._decoded.requestQueue,
+              eventQueue : market._decoded.eventQueue,
+              bids : market._decoded.bids,
+              asks: market._decoded.asks,
+              tokenVault: market._decoded.baseVault,
+              quoteTokenVault : market._decoded.quoteVault,
+              vaultSigner : vault_signer,
+              tokenPool : token_pools[x],
+              quoteTokenTransactionPool : quote_token_transaction_pool,
+              fruitBasketAuthority : fruitbasket_authority,
+              dexProgram : serum.DEX_ID,
+              tokenProgram : TOKEN_PROGRAM_ID,
+              rent : web3.SYSVAR_RENT_PUBKEY,
+            }
+          }
+        );
+      }));
+      // finalize context for revert context
+      await program.rpc.finalizeContext(
+        {
+          accounts : {
+            fruitbasketGroup : frt_bsk_group,
+            tradeContext : buy_context,
+            fruitbasket : basket_1,
+            quoteTokenAccount : client_usdc_acc,
+            basketTokenAccount : client_basket_token_acc,
+            quoteTokenTransactionPool : quote_token_transaction_pool,
+            fruitBasketAuthority : fruitbasket_authority,
+            quoteTokenMint : quote_token.publicKey,
+            basketTokenMint : basket_1_mint,
+            user : client_1.publicKey,
+            tokenProgram : TOKEN_PROGRAM_ID,
+            systemProgram : web3.SystemProgram.programId,
+          }
+        }
+      );
+    // check all accounts are untouched
+    const amount_of_basket_tokens_with_client_after = (await basket_1_token.getAccountInfo(client_basket_token_acc)).amount;
+    const amount_of_usdc_with_client_after = (await quote_token.getAccountInfo(client_usdc_acc)).amount;
+    const amount_of_btc_in_pool_after = (await (await btc).getAccountInfo(token_pools[0])).amount;
+    const amount_of_eth_in_pool_after = (await (await eth).getAccountInfo(token_pools[1])).amount;
+    const amount_of_sol_in_pool_after = (await (await sol).getAccountInfo(token_pools[2])).amount;
+    assert.equal(amount_of_basket_tokens_with_client_before.toNumber(), amount_of_basket_tokens_with_client_after.toNumber());
+    assert.equal(amount_of_usdc_with_client_before.toNumber(), amount_of_usdc_with_client_after.toNumber());
+    assert.equal(amount_of_btc_in_pool_before.toNumber(), amount_of_btc_in_pool_after.toNumber());
+    assert.equal(amount_of_eth_in_pool_before.toNumber(), amount_of_eth_in_pool_after.toNumber());
+    assert.equal(amount_of_sol_in_pool_before.toNumber(), amount_of_sol_in_pool_after.toNumber());
+  });
+
+  
+  it("Revert context tested for sell context", async() => {
+    const amount_of_basket_tokens_with_client_before = (await basket_1_token.getAccountInfo(client_basket_token_acc)).amount;
+    const amount_of_usdc_with_client_before = (await quote_token.getAccountInfo(client_usdc_acc)).amount;
+    const amount_of_btc_in_pool_before = (await (await btc).getAccountInfo(token_pools[0])).amount;
+    const amount_of_eth_in_pool_before = (await (await eth).getAccountInfo(token_pools[1])).amount;
+    const amount_of_sol_in_pool_before = (await (await sol).getAccountInfo(token_pools[2])).amount;
+
+    // Initiate a buy context that is to be reverted
+    const [sell_context, sell_context_bump] =
+      await web3.PublicKey.findProgramAddress(
+        [
+          Buffer.from("fruitbasket_context"),
+          client_1.publicKey.toBuffer(),
+          Buffer.from([0]),
+        ],
+        programId
+      );
+    await program.rpc.initTradeContext(
+      0,
+      sell_context_bump,
+      sell_side,
+      new anchor.BN(200000), // sell 0.2 basket
+      new anchor.BN(1024120000),
+      {
+        accounts: {
+          group: frt_bsk_group,
+          user: client_1.publicKey,
+          basket: basket_1,
+          cache: frt_bsk_cache,
+          quoteTokenAccount: client_usdc_acc,
+          basketTokenAccount: client_basket_token_acc,
+          basketTokenMint : basket_1_mint,
+          quoteTokenMint: quote_token.publicKey,
+          tradeContext: sell_context,
+          quoteTokenTransactionPool: quote_token_transaction_pool,
+          fruitBasketAuthority: fruitbasket_authority,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: web3.SystemProgram.programId,
+        },
+        signers: [client_1],
+      });
+      // partially process tokens / process only ETH and SOL not BTC
+      await Promise.all(Array.from({length:2}, (_, i) => i+1).map( async(x) => {
+        const token = await tokens[x];
+        const market = markets_by_tokens[x];
+        const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(market.publicKey);
+        await program.rpc.processTokenForContext(
+          {
+            accounts : {
+              fruitbasketGroup : frt_bsk_group,
+              tradeContext : sell_context,
+              tokenMint : token.publicKey,
+              quoteTokenMint : quote_token.publicKey,
+              basketTokenMint : basket_1_mint,
+              fruitbasket : basket_1,
+              market : market.publicKey,
+              openOrders : open_orders_by_token[x].publicKey,
+              requestQueue : market._decoded.requestQueue,
+              eventQueue : market._decoded.eventQueue,
+              bids : market._decoded.bids,
+              asks: market._decoded.asks,
+              tokenVault: market._decoded.baseVault,
+              quoteTokenVault : market._decoded.quoteVault,
+              vaultSigner : vault_signer,
+              tokenPool : token_pools[x],
+              quoteTokenTransactionPool : quote_token_transaction_pool,
+              fruitBasketAuthority : fruitbasket_authority,
+              dexProgram : serum.DEX_ID,
+              tokenProgram : TOKEN_PROGRAM_ID,
+              rent : web3.SYSVAR_RENT_PUBKEY,
+            }
+          }
+        );
+      }));
+
+      // Initiate revert for buy context
+      program.rpc.revertTradeContext(
+        {
+          accounts : {
+            fruitbasket : basket_1,
+            tradeContext : sell_context,
+            quoteTokenTransactionPool : quote_token_transaction_pool,
+          }
+        }
+      );
+      // process all tokens for revert context
+      await Promise.all(Array.from(Array(3).keys()).map( async(x) => {
+        const token = await tokens[x];
+        const market = markets_by_tokens[x];
+        const [vault_signer, _vault_bump] = await serum_utils.findVaultOwner(market.publicKey);
+        await program.rpc.processTokenForContext(
+          {
+            accounts : {
+              fruitbasketGroup : frt_bsk_group,
+              tradeContext : sell_context,
+              tokenMint : token.publicKey,
+              quoteTokenMint : quote_token.publicKey,
+              basketTokenMint : basket_1_mint,
+              fruitbasket : basket_1,
+              market : market.publicKey,
+              openOrders : open_orders_by_token[x].publicKey,
+              requestQueue : market._decoded.requestQueue,
+              eventQueue : market._decoded.eventQueue,
+              bids : market._decoded.bids,
+              asks: market._decoded.asks,
+              tokenVault: market._decoded.baseVault,
+              quoteTokenVault : market._decoded.quoteVault,
+              vaultSigner : vault_signer,
+              tokenPool : token_pools[x],
+              quoteTokenTransactionPool : quote_token_transaction_pool,
+              fruitBasketAuthority : fruitbasket_authority,
+              dexProgram : serum.DEX_ID,
+              tokenProgram : TOKEN_PROGRAM_ID,
+              rent : web3.SYSVAR_RENT_PUBKEY,
+            }
+          }
+        );
+      }));
+      // finalize context for revert context
+      await program.rpc.finalizeContext(
+        {
+          accounts : {
+            fruitbasketGroup : frt_bsk_group,
+            tradeContext : sell_context,
+            fruitbasket : basket_1,
+            quoteTokenAccount : client_usdc_acc,
+            basketTokenAccount : client_basket_token_acc,
+            quoteTokenTransactionPool : quote_token_transaction_pool,
+            fruitBasketAuthority : fruitbasket_authority,
+            quoteTokenMint : quote_token.publicKey,
+            basketTokenMint : basket_1_mint,
+            user : client_1.publicKey,
+            tokenProgram : TOKEN_PROGRAM_ID,
+            systemProgram : web3.SystemProgram.programId,
+          }
+        }
+      );
+      // const sell_context_info: BasketTradeContext = await program.account.basketTradeContext.fetch(sell_context);
+      // mlog.log("side : " + sell_context_info.side);
+      // mlog.log("basket : " + sell_context_info.basket.toString());
+      // mlog.log("number : " + sell_context_info.reverting);
+      // mlog.log("usdc_amount_left : " + sell_context_info.amount.toNumber());
+      // mlog.log("side : " + sell_context_info.side);
+    // check all accounts are untouched
+    const amount_of_basket_tokens_with_client_after = (await basket_1_token.getAccountInfo(client_basket_token_acc)).amount;
+    const amount_of_usdc_with_client_after = (await quote_token.getAccountInfo(client_usdc_acc)).amount;
+    const amount_of_btc_in_pool_after = (await (await btc).getAccountInfo(token_pools[0])).amount;
+    const amount_of_eth_in_pool_after = (await (await eth).getAccountInfo(token_pools[1])).amount;
+    const amount_of_sol_in_pool_after = (await (await sol).getAccountInfo(token_pools[2])).amount;
+    assert.equal(amount_of_basket_tokens_with_client_before.toNumber(), amount_of_basket_tokens_with_client_after.toNumber());
+    assert.equal(amount_of_usdc_with_client_before.toNumber(), amount_of_usdc_with_client_after.toNumber());
+    assert.equal(amount_of_btc_in_pool_before.toNumber(), amount_of_btc_in_pool_after.toNumber());
+    assert.equal(amount_of_eth_in_pool_before.toNumber(), amount_of_eth_in_pool_after.toNumber());
+    assert.equal(amount_of_sol_in_pool_before.toNumber(), amount_of_sol_in_pool_after.toNumber());
   });
 
   function ComponentInfo() {

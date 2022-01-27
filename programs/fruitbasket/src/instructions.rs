@@ -167,7 +167,7 @@ pub struct InitTradeContext<'info> {
 /// Process a token and its market for a context
 /// This instruction will buy/sell a specific token in the basket.
 /// token will be deposited/taken in/from the pools
-/// This method should be always permissionless
+/// This method should be always permissionless as it will be called by an offchain program
 #[derive(Accounts)]
 pub struct ProcessTokenOnContext<'info> {
     pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
@@ -219,6 +219,7 @@ pub struct ProcessTokenOnContext<'info> {
 /// Verify all tokens have been treated.
 /// Do all required check and give either baskettoken or usdc to the user
 /// context rent returned to the user
+/// permissionless as it is called by offchain program
 #[derive(Accounts)]
 pub struct FinalizeContext <'info> {
     pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
@@ -250,4 +251,16 @@ pub struct FinalizeContext <'info> {
     pub user : AccountInfo<'info>,
     pub token_program: AccountInfo<'info>,
     pub system_program : Program<'info, System>,
+}
+
+/// This instruction will be used to revert the trade context if there is a failure during trade of the basket.
+/// permissionless as it wil be used by offchain program
+/// off chain program will revert all context if they are not treated before n seconds
+#[derive(Accounts)]
+pub struct RevertTradeContext<'info> {
+    #[account(mut)]
+    pub trade_context : AccountLoader<'info, BasketTradeContext>,
+
+    pub fruitbasket : Box<Account<'info, Basket>>,
+    pub quote_token_transaction_pool : AccountInfo<'info>,
 }

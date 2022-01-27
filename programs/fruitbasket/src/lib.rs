@@ -81,4 +81,8 @@ pub mod fruitbasket {
     ) -> ProgramResult{
         processor::finalize_context(ctx)
     }
+
+    pub fn revert_trade_context( ctx: Context<RevertTradeContext> ) -> ProgramResult {
+        processor::revert_trade_context(ctx)
+    }
 }
