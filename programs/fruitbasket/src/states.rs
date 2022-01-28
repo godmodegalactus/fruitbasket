@@ -1,5 +1,4 @@
 use crate::*;
-use fixed::types::I80F48;
 /// Fruit basket group
 /// This contains all the data common for the market
 /// Owner for fruit basket echosystem should initialize this class should initialize this class
@@ -56,47 +55,6 @@ pub struct BasketComponentDescription{
     pub amount : u64,
     pub decimal : u8,
 }
-
-impl Basket {
-    pub fn update_price(&mut self, cache : &Cache) -> ProgramResult {
-        let mut price  = I80F48::from_num(0);
-        let mut confidence  = I80F48::from_num(0);
-        let decimal : u8 = 6;
-        
-        for i in 0..self.number_of_components {
-            let comp = self.components[i as usize];
-            let token_index : usize = comp.token_index as usize;
-            let mut comp_price = cache.last_price[token_index].checked_mul(comp.amount).unwrap().checked_div(10u64.pow(comp.decimal as u32)).unwrap();
-            let mut comp_conf = cache.last_confidence[token_index].checked_mul(comp.amount).unwrap().checked_div(10u64.pow(comp.decimal as u32)).unwrap();
-
-            //pyth decimal is negative usual decimal
-            let pyth_decimal = if cache.last_exp[token_index] >= 0 { 0 } else {-cache.last_exp[token_index] as u8};
-            
-            if pyth_decimal != decimal {
-                if pyth_decimal > decimal {
-                    let exp : u32 = (pyth_decimal - decimal) as u32;
-                    comp_price = comp_price.checked_div(10u64.pow(exp)).unwrap();
-                    comp_conf = comp_conf.checked_div(10u64.pow(exp)).unwrap();
-                }
-                else {
-                    let exp : u32 = (decimal - pyth_decimal) as u32;
-                    comp_price = comp_price.checked_mul(10u64.pow(exp)).unwrap();
-                    comp_conf = comp_conf.checked_mul(10u64.pow(exp)).unwrap();
-                }
-            }
-            price = price.checked_add( I80F48::from_num(comp_price) ).unwrap();
-            confidence = confidence.checked_add(I80F48::from_num(comp_conf) ).unwrap();
-        }
-        self.last_price = price.to_num::<u64>();
-        self.confidence = confidence.to_num::<u64>();
-        self.decimal = decimal;
-        let msg2= format!("total price {} confidence {}", price.to_num::<u64>(), confidence.to_num::<u64>());
-            msg!(&msg2[..]);
-        assert!(self.last_price > 0);
-        Ok(())
-    }
-}
-
 
 #[derive(AnchorSerialize, AnchorDeserialize, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]

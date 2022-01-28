@@ -5,6 +5,7 @@ use anchor_spl::dex::serum_dex::instruction::SelfTradeBehavior;
 use anchor_spl::dex::serum_dex::state::{ MarketState };
 use solana_program::sysvar::clock::Clock;
 use core::cell::RefMut;
+use fixed::types::I80F48;
 
 pub fn initialize_group(
     ctx: Context<InitializeGroup>,
@@ -44,18 +45,23 @@ pub fn initialize_group(
 }
 
 pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
-    assert!(name.len() <= 10);
+    if name.len() > 10 {
+        return Err(FruitBasketError::NameBufferOverflow.into());
+    }
     let mut group = ctx.accounts.fruit_basket_grp.load_mut()?;
     let current: usize = group.token_count as usize;
-    assert!(current < MAX_NB_TOKENS);
+    if current >= MAX_NB_TOKENS {
+        return Err(FruitBasketError::TokenCountLimitReached.into());
+    }
     group.token_description[current].token_mint = *ctx.accounts.mint.to_account_info().key;
     group.token_description[current].price_oracle = *ctx.accounts.price_oracle.key;
     group.token_description[current].product_oracle = *ctx.accounts.product_oracle.key;
     group.token_description[current].token_name[..name.len()].clone_from_slice(name[..].as_bytes());
-    let (authority, bump) =
-        Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
+    let (authority, bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
 
-    assert_eq!(authority, ctx.accounts.fruitbasket_authority.key());
+    if authority != ctx.accounts.fruitbasket_authority.key() {
+        return Err(FruitBasketError::UnknownAuthority.into());
+    }
     {
         // change authority of token pool to authority
         let cpi_accounts = SetAuthority {
@@ -97,10 +103,16 @@ pub fn add_basket(
     basket_desc: String,
     basket_components: Vec<BasketComponentDescription>,
 ) -> ProgramResult {
-    assert!(basket_components.len() < MAX_NB_COMPONENTS);
-    assert!(basket_components.len() > 1);
+    if basket_components.len() >= MAX_NB_COMPONENTS {
+        return Err(FruitBasketError::ComponentCountOverflow.into());
+    }
+    if basket_components.len() < 2 {
+        return Err(FruitBasketError::ComponentCountUnderflow.into());
+    }
     let mut group = ctx.accounts.group.load_mut()?;
-    assert!(group.number_of_baskets == basket_number);
+    if group.number_of_baskets != basket_number {
+        return Err(FruitBasketError::BasketNbMismatch.into());
+    }
 
     let basket = &mut ctx.accounts.basket;
     basket.basket_name[..basket_name.len()].copy_from_slice(basket_name[..].as_bytes());
@@ -139,13 +151,20 @@ pub fn update_price(ctx: Context<UpdatePrice>) -> ProgramResult {
         .iter()
         .position(|x| x.price_oracle == *ctx.accounts.oracle_ai.key);
     // check if oracle is registered in token list
-    assert_ne!(pos, None);
+    if pos == None {
+        return Err(FruitBasketError::TokenNotFound.into());
+    }
     let token_index = pos.unwrap();
     let oracle_data = ctx.accounts.oracle_ai.try_borrow_data()?;
     let oracle = pyth_client::cast::<Price>(&oracle_data);
-    assert!(oracle.agg.price > 0);
-    let threshold = oracle.agg.price.checked_div(10).unwrap(); // confidence should be within 10%
-    assert!(oracle.agg.conf < threshold as u64);
+    if oracle.agg.price <= 0 {
+        return Err(FruitBasketError::PriceEqualOrLessThanZero.into());
+    }
+    
+    let threshold : u64 = oracle.agg.price.checked_div(10).unwrap() as u64; // confidence should be within 10%
+    if oracle.agg.conf > threshold {
+        return Err(FruitBasketError::LowConfidenceInOracle.into());
+    } 
     cache.last_price[token_index] = oracle.agg.price as u64;
     cache.last_confidence[token_index] = oracle.agg.conf;
     cache.last_exp[token_index] = oracle.expo;
@@ -187,12 +206,18 @@ pub fn init_trade_context(
             possible_last_basket_price.checked_sub(possible_last_basket_price.checked_div(10).unwrap()).unwrap()
         };
     // maximum allowed price should be greater than current basket price plus the confidence of the price.
+    // TODO update this check by taking into account spread in orderbook so there are far less transactions to be reverted.
     if is_buy_side {
-        assert!(max_buy_or_min_sell_price > possible_last_basket_price);
+        if max_buy_or_min_sell_price < possible_last_basket_price {
+            return Err(FruitBasketError::TooLowMaximumBuyPrice.into());
+        }
         // largest maximum price allowed is 10% of possible_last_basket_price
         worst_case_price = if max_buy_or_min_sell_price > worst_case_price { worst_case_price } else { max_buy_or_min_sell_price };
 
-        assert!(ctx.accounts.quote_token_transaction_pool.key() == group.quote_token_transaction_pool);
+        if ctx.accounts.quote_token_transaction_pool.key() != group.quote_token_transaction_pool {
+            return Err(FruitBasketError::AccountsMismatch.into());
+        }
+        
 
         // transfer usdc from client to pool account
         let accounts = token::Transfer {
@@ -205,9 +230,14 @@ pub fn init_trade_context(
     }
     else {
         // burn the tokens which user wants to sell.
-        assert!(max_buy_or_min_sell_price < possible_last_basket_price);
+        if max_buy_or_min_sell_price > possible_last_basket_price {
+            return Err(FruitBasketError::TooHighMinimumSellPrice.into());
+        }
         let (authority, bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
-        assert_eq!(authority, ctx.accounts.fruit_basket_authority.key());
+
+        if authority != ctx.accounts.fruit_basket_authority.key() {
+            return Err(FruitBasketError::UnknownAuthority.into());
+        }
         let seeds = &[&FRUIT_BASKET_AUTHORITY[..], &[bump]];
         let signer = &[&seeds[..]];
 
@@ -259,7 +289,9 @@ pub fn init_trade_context(
 pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> ProgramResult {
     let basket_group = ctx.accounts.fruitbasket_group.load()?;
     let _token_index = basket_group.token_description.iter().position(|x| x.token_mint == ctx.accounts.token_mint.key());
-    assert_ne!(_token_index, None);
+    if _token_index == None {
+        return Err(FruitBasketError::TokenNotFound.into());
+    }
     let token_index = _token_index.unwrap();
     let fruitbasket = &ctx.accounts.fruitbasket;
     let _component_in_basket = fruitbasket.components.iter().position(|x| (x.token_index as usize) == token_index);
@@ -279,12 +311,16 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
                             || ( trade_context.side == ContextSide::Sell && trade_context.reverting == 1); // check if sell if reverting
 
     // checks to verify if we are in right context
-    assert_eq!(fruitbasket.key(), trade_context.basket); // same baskets
+    if fruitbasket.key() != trade_context.basket {
+        return Err( FruitBasketError::UnknownBasket.into() );
+    }
 
     // get authority bump and verify authority
     let (pda, bump) =
         Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
-    assert_eq!(ctx.accounts.fruit_basket_authority.key(), pda);
+    if ctx.accounts.fruit_basket_authority.key() != pda {
+        return Err(FruitBasketError::UnknownAuthority.into());
+    }
 
     let seeds = &[&FRUIT_BASKET_AUTHORITY[..], &[bump]];
     // set side
@@ -338,14 +374,22 @@ pub fn finalize_context(ctx : Context<FinalizeContext>) -> ProgramResult {
     let basket_group = ctx.accounts.fruitbasket_group.load()?;
     // check if all tokens are treated
     for i in 0..basket_group.token_count {
-        assert_eq!(trade_context.tokens_treated[i as usize], 1);
+        if trade_context.tokens_treated[i as usize] != 1 {
+            return Err(FruitBasketError::NotAllTokensTreatedBeforeFinalize.into());
+        }
     }
     // some more checks
-    assert!( trade_context.basket == ctx.accounts.fruitbasket.key() );
-    assert!( trade_context.quote_token_account == ctx.accounts.quote_token_account.key() );
-    assert!( trade_context.basket_token_account == ctx.accounts.basket_token_account.key() );
+    if trade_context.basket != ctx.accounts.fruitbasket.key() {
+        return Err(FruitBasketError::UnknownBasket.into());
+    }
+    if trade_context.quote_token_account != ctx.accounts.quote_token_account.key() ||
+        trade_context.basket_token_account != ctx.accounts.basket_token_account.key() {
+            return Err(FruitBasketError::AccountsMismatch.into());
+        }
     let (authority, bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
-    assert_eq!(authority, ctx.accounts.fruit_basket_authority.key());
+    if authority != ctx.accounts.fruit_basket_authority.key() {
+        return Err(FruitBasketError::UnknownAuthority.into());
+    }
     let seeds = [&FRUIT_BASKET_AUTHORITY[..], &[bump]];
     let signer = &[&seeds[..]];
 
@@ -414,8 +458,12 @@ pub fn revert_trade_context( ctx: Context<RevertTradeContext> ) -> ProgramResult
     if trade_context.reverting == 1 {
         return Ok(())
     }
-    trade_context.reverting = 1;
     let basket = &ctx.accounts.fruitbasket;
+    if basket.key() != trade_context.basket {
+        return Err( FruitBasketError::UnknownBasket.into() );
+    }
+
+    trade_context.reverting = 1;
     for index in 0..basket.number_of_components {
         let token_index = index as usize;
         if trade_context.tokens_treated[token_index] == 1 {
@@ -437,6 +485,8 @@ pub fn revert_trade_context( ctx: Context<RevertTradeContext> ) -> ProgramResult
     if trade_context.side == ContextSide::Buy {
         trade_context.usdc_amount_left = 0;
     } else  {
+        // TODO ASAP smarter way to calculate the usdc limit to buy back the tokens in case of revert.
+        // Multiple strategies available.
         trade_context.usdc_amount_left = token::accessor::amount(&ctx.accounts.quote_token_transaction_pool)?;
     }
     Ok(())
@@ -513,5 +563,48 @@ impl<'info> ProcessTokenOnContext<'info>{
         };
         let settle_ctx = CpiContext::new(self.dex_program.clone(), settle_accs);
         dex::settle_funds(settle_ctx.with_signer(seeds))
+    }
+}
+
+
+impl Basket {
+    pub fn update_price(&mut self, cache : &Cache) -> ProgramResult {
+        let mut price  = I80F48::from_num(0);
+        let mut confidence  = I80F48::from_num(0);
+        let decimal : u8 = 6;
+        
+        for i in 0..self.number_of_components {
+            let comp = self.components[i as usize];
+            let token_index : usize = comp.token_index as usize;
+            let mut comp_price = cache.last_price[token_index].checked_mul(comp.amount).unwrap().checked_div(10u64.pow(comp.decimal as u32)).unwrap();
+            let mut comp_conf = cache.last_confidence[token_index].checked_mul(comp.amount).unwrap().checked_div(10u64.pow(comp.decimal as u32)).unwrap();
+
+            //pyth decimal is negative usual decimal
+            let pyth_decimal = if cache.last_exp[token_index] >= 0 { 0 } else {-cache.last_exp[token_index] as u8};
+            
+            if pyth_decimal != decimal {
+                if pyth_decimal > decimal {
+                    let exp : u32 = (pyth_decimal - decimal) as u32;
+                    comp_price = comp_price.checked_div(10u64.pow(exp)).unwrap();
+                    comp_conf = comp_conf.checked_div(10u64.pow(exp)).unwrap();
+                }
+                else {
+                    let exp : u32 = (decimal - pyth_decimal) as u32;
+                    comp_price = comp_price.checked_mul(10u64.pow(exp)).unwrap();
+                    comp_conf = comp_conf.checked_mul(10u64.pow(exp)).unwrap();
+                }
+            }
+            price = price.checked_add( I80F48::from_num(comp_price) ).unwrap();
+            confidence = confidence.checked_add(I80F48::from_num(comp_conf) ).unwrap();
+        }
+        self.last_price = price.to_num::<u64>();
+        self.confidence = confidence.to_num::<u64>();
+        self.decimal = decimal;
+        let msg2= format!("total price {} confidence {}", price.to_num::<u64>(), confidence.to_num::<u64>());
+            msg!(&msg2[..]);
+        if self.last_price <= 0 {
+            return Err(FruitBasketError::PriceEqualOrLessThanZero.into());
+        }
+        Ok(())
     }
 }
