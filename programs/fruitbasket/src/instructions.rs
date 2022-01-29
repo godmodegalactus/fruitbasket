@@ -61,7 +61,7 @@ pub struct AddToken<'info>{
 }
 
 /// Add basket -> To create a new basket.
-/// Need to pass all tokens and amounts by instruction
+/// Need to pass all token mints and amounts by instruction
 /// This will create a basket key and a basket mint key
 /// Basket mint are special mint for each basket that will be minted when you buy a basket
 #[derive(Accounts)]
@@ -94,6 +94,7 @@ pub struct AddBasket<'info> {
 }
 
 // Permissionless instruction which should be called to update price in cache
+// This will called after a fixed period by offchain program
 #[derive(Accounts)]
 pub struct UpdatePrice<'info> {
     pub group : AccountLoader<'info, FruitBasketGroup>,
@@ -105,6 +106,7 @@ pub struct UpdatePrice<'info> {
 
 // permissionless instruction which should be called to update the basket price from the cache
 // pass all required token description metas as remaining accounts
+// called by offchain program at a fixed interval
 #[derive(Accounts)]
 pub struct UpdateBasketPrice<'info> {
     #[account(mut)]
@@ -178,14 +180,12 @@ pub struct ProcessTokenOnContext<'info> {
     pub token_mint : Account<'info, Mint>,
 
     pub quote_token_mint : Account<'info, Mint>,
-    #[account(mut)]
-    pub basket_token_mint : Account<'info, Mint>,
 
     pub fruitbasket : Box<Account<'info, Basket>>,
     // accounts related to market and serum
-    #[account(mut)]
+    #[account(mut, constraint = market.key() == token_desc.market)]
     pub market: AccountInfo<'info>,
-    #[account(mut)]
+    #[account(mut, constraint = open_orders.key() == token_desc.token_open_orders)]
     pub open_orders: AccountInfo<'info>,
     #[account(mut)]
     pub request_queue: AccountInfo<'info>,

@@ -32,4 +32,8 @@ pub enum FruitBasketError {
     NotAllTokensTreatedBeforeFinalize,
     #[msg("Error fetching token description")]
     ErrorDeserializeTokeDesc,
+    #[msg("Unknown market")]
+    UnknownMarket,
+    #[msg("Unknown Open Orders")]
+    UnknownOpenOrders
 }
