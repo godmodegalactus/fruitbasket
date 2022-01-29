@@ -65,7 +65,7 @@ pub struct AddToken<'info>{
 /// This will create a basket key and a basket mint key
 /// Basket mint are special mint for each basket that will be minted when you buy a basket
 #[derive(Accounts)]
-#[instruction(basket_number : u8, basket_bump : u8, basket_mint_bump : u8)]
+#[instruction(basket_number : u64, basket_bump : u8, basket_mint_bump : u8)]
 pub struct AddBasket<'info> {
     #[account(mut, signer)]
     pub client : AccountInfo<'info>,
@@ -74,14 +74,14 @@ pub struct AddBasket<'info> {
     pub group : AccountLoader<'info, FruitBasketGroup>,
     
     #[account( init,
-               seeds = [FRUIT_BASKET, &[basket_number]],
+               seeds = [FRUIT_BASKET, &basket_number.to_le_bytes()],
                bump = basket_bump,
                payer = client,
                space = 8 + size_of::<Basket>())]
     pub basket : Box<Account<'info, Basket>>,
 
     #[account(init,
-              seeds = [FRUIT_BASKET_MINT, &[basket_number]],
+              seeds = [FRUIT_BASKET_MINT, &basket_number.to_le_bytes()],
               bump = basket_mint_bump,
               payer = client,
               owner = token::ID,

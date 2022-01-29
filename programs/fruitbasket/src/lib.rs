@@ -44,7 +44,7 @@ pub mod fruitbasket {
 
     // add basket
     pub fn add_basket(ctx : Context<AddBasket>, 
-        basket_number : u8, 
+        basket_number : u64, 
         _basket_bump : u8, 
         _basket_mint_bump : u8,
         basket_name : String, 

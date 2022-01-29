@@ -96,7 +96,7 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
 
 pub fn add_basket(
     ctx: Context<AddBasket>,
-    basket_number: u8,
+    basket_number: u64,
     basket_name: String,
     basket_desc: String,
     basket_components: Vec<BasketComponentDescription>,

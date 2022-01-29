@@ -255,13 +255,13 @@ describe("fruitbasket", () => {
     comp_sh2.decimal = 6;
 
     // first basket
-    let basket_nb = 0;
+    let basket_nb = new anchor.BN(0);
     const [_basket_1, bump_b1] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("fruitbasket"), Buffer.from([basket_nb])],
+      [Buffer.from("fruitbasket"), basket_nb.toBuffer("le", 8)],
       program.programId
     );
     const [_basket_1_mint, bump_b1m] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("fruitbasket_mint"), Buffer.from([basket_nb])],
+      [Buffer.from("fruitbasket_mint"), basket_nb.toBuffer("le", 8)],
       program.programId
     );
     const components_1 = [comp_btc, comp_eth, comp_sol];
@@ -288,15 +288,14 @@ describe("fruitbasket", () => {
         signers: [owner],
       }
     );
-
     // second basket
-    ++basket_nb
+    basket_nb = new anchor.BN(1);
     const [_basket_2, bump_b2] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("fruitbasket"), Buffer.from([basket_nb])],
+      [Buffer.from("fruitbasket"), basket_nb.toBuffer("le", 8)],
       program.programId
     );
     const [_basket_2_mint, bump_b2m] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("fruitbasket_mint"), Buffer.from([basket_nb])],
+      [Buffer.from("fruitbasket_mint"), basket_nb.toBuffer("le", 8)],
       program.programId
     );
     const components_2 = [comp_sol, comp_srm, comp_mngo];
@@ -323,15 +322,14 @@ describe("fruitbasket", () => {
         signers: [owner],
       }
     );
-
     // third basket
-    ++basket_nb;
+    basket_nb = new anchor.BN(2);
     const [_basket_3, bump_b3] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("fruitbasket"), Buffer.from([basket_nb])],
+      [Buffer.from("fruitbasket"), basket_nb.toBuffer("le", 8)],
       program.programId
     );
     const [_basket_3_mint, bump_b3m] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("fruitbasket_mint"), Buffer.from([basket_nb])],
+      [Buffer.from("fruitbasket_mint"), basket_nb.toBuffer("le", 8)],
       program.programId
     );
     const components_3 = [comp_sh1, comp_sh2];
