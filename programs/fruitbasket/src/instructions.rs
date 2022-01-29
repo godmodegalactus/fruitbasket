@@ -15,13 +15,6 @@ pub struct InitializeGroup<'info> {
         space = 8 + size_of::<FruitBasketGroup>() )]
     pub fruit_basket_grp : AccountLoader<'info, FruitBasketGroup>,
 
-    #[account( init,
-        seeds = [FRUIT_BASKET_CACHE, &owner.key.to_bytes()],
-        bump = bump_cache, 
-        payer = owner, 
-        space = 8 + size_of::<Cache>() )]
-    pub cache : AccountLoader<'info, Cache>,
-
     pub quote_token_mint : Box<Account<'info, Mint>>,
     
     #[account(mut,
@@ -35,8 +28,9 @@ pub struct InitializeGroup<'info> {
 /// Add Token ->  to add new token to the market.
 /// To add a token we need to know the market and pyth price and product keys
 #[derive(Accounts)]
+#[instruction(bump : u8)]
 pub struct AddToken<'info>{
-    #[account(signer)]
+    #[account(mut, signer)]
     pub owner : AccountInfo<'info>,
 
     #[account(mut)]
@@ -51,10 +45,17 @@ pub struct AddToken<'info>{
     pub token_pool : Account<'info, TokenAccount>,
 
     pub market : AccountInfo<'info>,
+    #[account(init,
+              seeds = [FRUIT_BASKET_TOKEN, &mint.to_account_info().key.to_bytes()],
+              bump = bump,
+              payer=owner,
+              space = 8 + size_of::<TokenDescription>(),)]
+    pub token_desc : Box<Account<'info, TokenDescription>>,
     #[account(mut)]
     pub open_orders_account : AccountInfo<'info>,
     pub fruitbasket_authority : AccountInfo<'info>,
     pub token_program : AccountInfo<'info>,
+    pub system_program : Program<'info, System>,
     pub dex_program : AccountInfo<'info>,
     pub rent : AccountInfo<'info>,
 }
@@ -71,7 +72,8 @@ pub struct AddBasket<'info> {
 
     #[account(mut)]
     pub group : AccountLoader<'info, FruitBasketGroup>,
-    #[account(init,
+    
+    #[account( init,
                seeds = [FRUIT_BASKET, &[basket_number]],
                bump = basket_bump,
                payer = client,
@@ -96,17 +98,17 @@ pub struct AddBasket<'info> {
 pub struct UpdatePrice<'info> {
     pub group : AccountLoader<'info, FruitBasketGroup>,
     #[account(mut)]
-    pub cache : AccountLoader<'info, Cache>,
+    pub token_desc : Box<Account<'info, TokenDescription>>,
+    #[account(constraint = token_desc.price_oracle == oracle_ai.key())]
     pub oracle_ai : AccountInfo<'info>,
 }
 
 // permissionless instruction which should be called to update the basket price from the cache
+// pass all required token description metas as remaining accounts
 #[derive(Accounts)]
 pub struct UpdateBasketPrice<'info> {
     #[account(mut)]
     pub basket : Box<Account<'info, Basket>>,
-
-    pub cache : AccountLoader<'info, Cache>,
 }
 
 /// Creates a context for a basket trade {buying, selling}
@@ -126,8 +128,6 @@ pub struct InitTradeContext<'info> {
 
     pub basket : Box<Account<'info, Basket>>,
     
-    pub cache : AccountLoader<'info, Cache>,
-
     // user quote token account i.e usdc account
     #[account(mut,
                 constraint = quote_token_account.owner == *user.key,
@@ -170,10 +170,10 @@ pub struct InitTradeContext<'info> {
 /// This method should be always permissionless as it will be called by an offchain program
 #[derive(Accounts)]
 pub struct ProcessTokenOnContext<'info> {
-    pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
-
     #[account(mut)]
     pub trade_context : AccountLoader<'info, BasketTradeContext>,
+    #[account(constraint = token_desc.token_mint == token_mint.key())]
+    pub token_desc : Box<Account<'info, TokenDescription>>,
 
     pub token_mint : Account<'info, Mint>,
 
@@ -222,8 +222,6 @@ pub struct ProcessTokenOnContext<'info> {
 /// permissionless as it is called by offchain program
 #[derive(Accounts)]
 pub struct FinalizeContext <'info> {
-    pub fruitbasket_group : AccountLoader<'info, FruitBasketGroup>,
-
     #[account(mut, close = user)]
     pub trade_context : AccountLoader<'info, BasketTradeContext>,
 

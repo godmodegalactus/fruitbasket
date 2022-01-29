@@ -15,7 +15,7 @@ import { Market, OpenOrders, DexInstructions } from "@project-serum/serum";
 
 import * as pyth from "./utils/pyth";
 import * as serum from "./utils/serum";
-import { token } from "@project-serum/anchor/dist/cjs/utils";
+import { publicKey, token } from "@project-serum/anchor/dist/cjs/utils";
 import mlog from "mocha-logger";
 import { assert } from "chai";
 import { TestToken, TestUtils } from "./utils/test_utils";
@@ -109,11 +109,11 @@ describe("fruitbasket", () => {
   });
 
   let frt_bsk_group = null;
-  let frt_bsk_cache = null;
   let fruitbasket_authority: web3.PublicKey;
   let fb_auth_bump: number;
   let quote_token_transaction_pool: web3.PublicKey;
 
+  /// Create group
   it("Group initialized", async () => {
     await provider.connection.confirmTransaction(
       await provider.connection.requestAirdrop(owner.publicKey, 100000000000),
@@ -140,9 +140,7 @@ describe("fruitbasket", () => {
     );
 
     frt_bsk_group = tmp_group;
-    frt_bsk_cache = tmp_cache;
     mlog.log("group : " + frt_bsk_group);
-    mlog.log("cache : " + frt_bsk_cache);
     quote_token_transaction_pool = await quote_token.createAccount(
       owner.publicKey
     );
@@ -150,7 +148,6 @@ describe("fruitbasket", () => {
       accounts: {
         owner: owner.publicKey,
         fruitBasketGrp: frt_bsk_group,
-        cache: frt_bsk_cache,
         quoteTokenMint: quote_token.publicKey,
         quoteTokenTransactionPool: quote_token_transaction_pool,
         systemProgram: web3.SystemProgram.programId,
@@ -162,6 +159,10 @@ describe("fruitbasket", () => {
 
   let open_orders_by_token: web3.Keypair[];
   let token_pools: web3.PublicKey[];
+  // description of fruitbasket tokens
+  let fruitbasket_token_descs: web3.PublicKey[] = [];
+
+  /// Add tokens
   it("Tokens added ", async () => {
     let token_list = await Promise.all(tokens);
     const openOrdersSpace = OpenOrders.getLayout(serum.DEX_ID).span;
@@ -178,7 +179,15 @@ describe("fruitbasket", () => {
     for (let index = 0; index < nb_tokens; ++index) {
       let marketKey = markets[index].publicKey;
       let open_orders = open_orders_by_token[index];
-      await program.rpc.addToken(token_names[index], {
+
+      const [token_desc, bump] = await web3.PublicKey.findProgramAddress(
+        [Buffer.from("fruitbasket_token"), token_list[index].publicKey.toBuffer()],
+      programId,
+      );
+
+      fruitbasket_token_descs.push(token_desc);
+      
+      await program.rpc.addToken(bump, token_names[index], {
         accounts: {
           owner: owner.publicKey,
           fruitBasketGrp: frt_bsk_group,
@@ -187,11 +196,13 @@ describe("fruitbasket", () => {
           productOracle: (await produce_oracles[index]).publicKey,
           tokenPool: token_pools[index],
           market: marketKey,
+          tokenDesc : token_desc,
           openOrdersAccount: open_orders.publicKey,
           fruitbasketAuthority: fruitbasket_authority,
           tokenProgram: TOKEN_PROGRAM_ID,
           dexProgram: serum.DEX_ID,
           rent: web3.SYSVAR_RENT_PUBKEY,
+          systemProgram : web3.SystemProgram.programId,
         },
         signers: [owner],
       });
@@ -205,40 +216,41 @@ describe("fruitbasket", () => {
   let basket_2_mint: web3.PublicKey;
   let basket_3_mint: web3.PublicKey;
 
+  /// Add 3 baskets
   it("Baskets created ", async () => {
     const exp = 1000000;
     let comp_btc = new ComponentInfo();
-    comp_btc.tokenIndex = 0;
+    comp_btc.tokenMint = (await btc).publicKey;
     comp_btc.amount = new anchor.BN(exp * 0.01); // 0.01 BTC
     comp_btc.decimal = 6;
 
     let comp_eth = new ComponentInfo();
-    comp_eth.tokenIndex = 1;
+    comp_eth.tokenMint = (await eth).publicKey;
     comp_eth.amount = new anchor.BN(exp * 0.1); // 0.1 ETC
     comp_eth.decimal = 6;
 
     let comp_sol = new ComponentInfo();
-    comp_sol.tokenIndex = 2;
+    comp_sol.tokenMint = (await sol).publicKey;
     comp_sol.amount = new anchor.BN(exp * 2); // 2 SOL
     comp_sol.decimal = 6;
 
     let comp_srm = new ComponentInfo();
-    comp_srm.tokenIndex = 3;
+    comp_srm.tokenMint = (await srm).publicKey;
     comp_srm.amount = new anchor.BN(exp * 100); // 100 SRM
     comp_srm.decimal = 6;
 
     let comp_mngo = new ComponentInfo();
-    comp_mngo.tokenIndex = 4;
+    comp_mngo.tokenMint = (await mngo).publicKey;
     comp_mngo.amount = new anchor.BN(exp * 1000); // 1000 MNGO
     comp_mngo.decimal = 6;
 
     let comp_sh1 = new ComponentInfo();
-    comp_sh1.tokenIndex = 5;
+    comp_sh1.tokenMint = (await shit1).publicKey;
     comp_sh1.amount = new anchor.BN(exp * 10000); // 10000 SHIT1
     comp_sh1.decimal = 6;
 
     let comp_sh2 = new ComponentInfo();
-    comp_sh2.tokenIndex = 6;
+    comp_sh2.tokenMint = (await shit2).publicKey;
     comp_sh2.amount = new anchor.BN(exp * 100000); // 100000 SHIT1
     comp_sh2.decimal = 6;
 
@@ -278,7 +290,7 @@ describe("fruitbasket", () => {
     );
 
     // second basket
-    ++basket_nb;
+    ++basket_nb
     const [_basket_2, bump_b2] = await web3.PublicKey.findProgramAddress(
       [Buffer.from("fruitbasket"), Buffer.from([basket_nb])],
       program.programId
@@ -354,18 +366,19 @@ describe("fruitbasket", () => {
 
     assert.ok(group_info.baseMint.equals(quote_token.publicKey));
     assert.ok(group_info.nbUsers == 0);
-    assert.ok(group_info.numberOfBaskets == 3);
-    assert.ok(group_info.tokenCount == nb_tokens);
+    assert.ok(group_info.numberOfBaskets.toNumber() == 3);
+    assert.ok(group_info.tokenCount.toNumber() == nb_tokens);
   });
 
+  /// update token cache
   it("cache updated", async () => {
     await Promise.all(
-      price_oracles.map(async (x) => {
+      Array.from(Array(tokens.length).keys()).map(async (x) => {
         await program.rpc.updatePrice({
           accounts: {
             group: frt_bsk_group,
-            cache: frt_bsk_cache,
-            oracleAi: (await x).publicKey,
+            tokenDesc : fruitbasket_token_descs[x],
+            oracleAi: (await price_oracles[x]).publicKey,
           },
         });
       })
@@ -373,13 +386,18 @@ describe("fruitbasket", () => {
   });
   let basket_1_price : anchor.BN;
   let basket_1_confidence : anchor.BN;
+
+  /// price basket
   it("basket priced", async () => {
+    let token_desc_metas = [];
+    fruitbasket_token_descs.forEach( x => { token_desc_metas.push( {isSigner : false, isWritable : false, pubkey : x} ); })
+    
     // price basket 1
     await program.rpc.updateBasketPrice({
       accounts: {
         basket: basket_1,
-        cache: frt_bsk_cache,
       },
+      remainingAccounts : token_desc_metas,
     });
     const basket_1_info: Basket = await program.account.basket.fetch(basket_1);
     basket_1_price = basket_1_info.lastPrice;
@@ -392,8 +410,8 @@ describe("fruitbasket", () => {
     await program.rpc.updateBasketPrice({
       accounts: {
         basket: basket_2,
-        cache: frt_bsk_cache,
       },
+      remainingAccounts : token_desc_metas,
     });
 
     const basket_2_info: Basket = await program.account.basket.fetch(basket_2);
@@ -405,8 +423,8 @@ describe("fruitbasket", () => {
     await program.rpc.updateBasketPrice({
       accounts: {
         basket: basket_3,
-        cache: frt_bsk_cache,
       },
+      remainingAccounts : token_desc_metas,
     });
     const basket_3_info: Basket = await program.account.basket.fetch(basket_3);
     assert.ok(basket_3_info.lastPrice.toNumber() > 0);
@@ -428,6 +446,8 @@ describe("fruitbasket", () => {
   type ContextSide = anchor.IdlTypes<Fruitbasket>["ContextSide"];
   const buy_side = ContextSide.Buy;
   const sell_side = ContextSide.Sell;
+
+  /// Buy basket
   it("Buy Basket", async () => {
     await connection.confirmTransaction(
       await connection.requestAirdrop(
@@ -482,7 +502,6 @@ describe("fruitbasket", () => {
           group: frt_bsk_group,
           user: client_1.publicKey,
           basket: basket_1,
-          cache: frt_bsk_cache,
           quoteTokenAccount: client_usdc_acc,
           basketTokenAccount: client_basket_token_acc,
           basketTokenMint : basket_1_mint,
@@ -513,12 +532,11 @@ describe("fruitbasket", () => {
       assert.equal(buy_context_info.initialUsdcTransferAmount.toNumber(), worst_basket_price);
       for( let i = 0; i < basket_1_info.numberOfComponents; ++i)
       {
-        const component : BasketComponent = basket_components[i];
-
-        assert.equal(buy_context_info.tokensTreated[component.tokenIndex], 0);
-        assert.equal(buy_context_info.tokenAmounts[component.tokenIndex].toNumber(), component.amount.toNumber()); // check that amount of tokens to transfer matches with component amount
+        const component = basket_1_info.components[i];
+        assert.equal(buy_context_info.tokensTreated[i], 0);
+        assert.equal(buy_context_info.tokenAmounts[i].toNumber(), component.amount.toNumber()); // check that amount of tokens to transfer matches with component amount
         // fill the array with appropriate token amounts
-        token_amounts_in_basket[component.tokenIndex] = component.amount.toNumber();
+        token_amounts_in_basket[i] = component.amount.toNumber();
       }
     }
     // after init buy context, we have to initialize each token one by one.
@@ -534,7 +552,7 @@ describe("fruitbasket", () => {
       await program.rpc.processTokenForContext(
         {
           accounts : {
-            fruitbasketGroup : frt_bsk_group,
+            tokenDesc : fruitbasket_token_descs[x],
             tradeContext : buy_context,
             tokenMint : token.publicKey,
             quoteTokenMint : quote_token.publicKey,
@@ -575,9 +593,8 @@ describe("fruitbasket", () => {
       assert.equal(buy_context_info.basketTokenAccount.toString(), client_basket_token_acc.toString());
       const basket_1_info: Basket = await program.account.basket.fetch(basket_1);
       const basket_components : [BasketComponent] = basket_1_info.components;
-      for (let i = 0; i < token_list.length; ++i) {
-        const component : BasketComponent = basket_components[i];
-        assert.equal(buy_context_info.tokensTreated[component.tokenIndex], 1);
+      for (let i = 0; i < basket_1_info.numberOfComponents; ++i) {
+        assert.equal(buy_context_info.tokensTreated[i], 1);
       }
     }
     // finalize the trade
@@ -638,7 +655,6 @@ describe("fruitbasket", () => {
           group: frt_bsk_group,
           user: client_1.publicKey,
           basket: basket_1,
-          cache: frt_bsk_cache,
           quoteTokenAccount: client_usdc_acc,
           basketTokenAccount: client_basket_token_acc,
           basketTokenMint : basket_1_mint,
@@ -659,7 +675,7 @@ describe("fruitbasket", () => {
         await program.rpc.processTokenForContext(
           {
             accounts : {
-              fruitbasketGroup : frt_bsk_group,
+              tokenDesc : fruitbasket_token_descs[x],
               tradeContext : buy_context,
               tokenMint : token.publicKey,
               quoteTokenMint : quote_token.publicKey,
@@ -734,7 +750,6 @@ describe("fruitbasket", () => {
           group: frt_bsk_group,
           user: client_1.publicKey,
           basket: basket_1,
-          cache: frt_bsk_cache,
           quoteTokenAccount: client_usdc_acc,
           basketTokenAccount: client_basket_token_acc,
           basketTokenMint : basket_1_mint,
@@ -755,7 +770,7 @@ describe("fruitbasket", () => {
         await program.rpc.processTokenForContext(
           {
             accounts : {
-              fruitbasketGroup : frt_bsk_group,
+              tokenDesc : fruitbasket_token_descs[x],
               tradeContext : sell_context,
               tokenMint : token.publicKey,
               quoteTokenMint : quote_token.publicKey,
@@ -844,7 +859,6 @@ describe("fruitbasket", () => {
           group: frt_bsk_group,
           user: client_1.publicKey,
           basket: basket_1,
-          cache: frt_bsk_cache,
           quoteTokenAccount: client_usdc_acc,
           basketTokenAccount: client_basket_token_acc,
           basketTokenMint : basket_1_mint,
@@ -865,7 +879,7 @@ describe("fruitbasket", () => {
         await program.rpc.processTokenForContext(
           {
             accounts : {
-              fruitbasketGroup : frt_bsk_group,
+              tokenDesc: fruitbasket_token_descs[x],
               tradeContext : buy_context,
               tokenMint : token.publicKey,
               quoteTokenMint : quote_token.publicKey,
@@ -909,7 +923,7 @@ describe("fruitbasket", () => {
         await program.rpc.processTokenForContext(
           {
             accounts : {
-              fruitbasketGroup : frt_bsk_group,
+              tokenDesc : fruitbasket_token_descs[x],
               tradeContext : buy_context,
               tokenMint : token.publicKey,
               quoteTokenMint : quote_token.publicKey,
@@ -995,7 +1009,6 @@ describe("fruitbasket", () => {
           group: frt_bsk_group,
           user: client_1.publicKey,
           basket: basket_1,
-          cache: frt_bsk_cache,
           quoteTokenAccount: client_usdc_acc,
           basketTokenAccount: client_basket_token_acc,
           basketTokenMint : basket_1_mint,
@@ -1016,7 +1029,7 @@ describe("fruitbasket", () => {
         await program.rpc.processTokenForContext(
           {
             accounts : {
-              fruitbasketGroup : frt_bsk_group,
+              tokenDesc : fruitbasket_token_descs[x],
               tradeContext : sell_context,
               tokenMint : token.publicKey,
               quoteTokenMint : quote_token.publicKey,
@@ -1060,7 +1073,7 @@ describe("fruitbasket", () => {
         await program.rpc.processTokenForContext(
           {
             accounts : {
-              fruitbasketGroup : frt_bsk_group,
+              tokenDesc : fruitbasket_token_descs[x],
               tradeContext : sell_context,
               tokenMint : token.publicKey,
               quoteTokenMint : quote_token.publicKey,
@@ -1124,7 +1137,7 @@ describe("fruitbasket", () => {
   });
 
   function ComponentInfo() {
-    this.tokenIndex;
+    this.tokenMint;
     this.amount;
     this.decimal;
   }

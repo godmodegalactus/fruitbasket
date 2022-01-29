@@ -11,8 +11,6 @@ pub fn initialize_group(
     ctx: Context<InitializeGroup>,
     base_mint_name: String,
 ) -> ProgramResult {
-    // init cache
-    ctx.accounts.cache.load_init()?;
     // init gr
     let mut group = ctx.accounts.fruit_basket_grp.load_init()?;
     group.owner = *ctx.accounts.owner.key;
@@ -49,14 +47,14 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
         return Err(FruitBasketError::NameBufferOverflow.into());
     }
     let mut group = ctx.accounts.fruit_basket_grp.load_mut()?;
-    let current: usize = group.token_count as usize;
-    if current >= MAX_NB_TOKENS {
-        return Err(FruitBasketError::TokenCountLimitReached.into());
-    }
-    group.token_description[current].token_mint = *ctx.accounts.mint.to_account_info().key;
-    group.token_description[current].price_oracle = *ctx.accounts.price_oracle.key;
-    group.token_description[current].product_oracle = *ctx.accounts.product_oracle.key;
-    group.token_description[current].token_name[..name.len()].clone_from_slice(name[..].as_bytes());
+    let token_description = &mut ctx.accounts.token_desc;
+    token_description.magic = TOKEN_DESC_MAGIC;
+    token_description.id = group.token_count;
+
+    token_description.token_mint = *ctx.accounts.mint.to_account_info().key;
+    token_description.price_oracle = *ctx.accounts.price_oracle.key;
+    token_description.product_oracle = *ctx.accounts.product_oracle.key;
+    token_description.token_name[..name.len()].clone_from_slice(name[..].as_bytes());
     let (authority, bump) = Pubkey::find_program_address(&[FRUIT_BASKET_AUTHORITY], ctx.program_id);
 
     if authority != ctx.accounts.fruitbasket_authority.key() {
@@ -72,8 +70,8 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
         let cpi = CpiContext::new(cpi_program, cpi_accounts);
         token::set_authority(cpi, AuthorityType::AccountOwner, Some(authority))?;
     }
-    group.token_description[current].token_pool = *ctx.accounts.token_pool.to_account_info().key;
-    group.token_description[current].token_decimal = ctx.accounts.mint.decimals;
+    token_description.token_pool = *ctx.accounts.token_pool.to_account_info().key;
+    token_description.token_decimal = ctx.accounts.mint.decimals;
     
     group.token_count += 1;
     if ctx.accounts.market.key() == empty::ID {
@@ -90,8 +88,8 @@ pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
     let oo_ctx = CpiContext::new(ctx.accounts.dex_program.clone(), open_order_instruction);
     dex::init_open_orders(oo_ctx.with_signer(&[seeds]))?;
 
-    group.token_description[current].token_open_orders = ctx.accounts.open_orders_account.key();
-    group.token_description[current].market = ctx.accounts.market.key();
+    token_description.token_open_orders = ctx.accounts.open_orders_account.key();
+    token_description.market = ctx.accounts.market.key();
     //group.token
     Ok(())
 }
@@ -110,11 +108,12 @@ pub fn add_basket(
         return Err(FruitBasketError::ComponentCountUnderflow.into());
     }
     let mut group = ctx.accounts.group.load_mut()?;
-    if group.number_of_baskets != basket_number {
+    if group.number_of_baskets != (basket_number as u64) {
         return Err(FruitBasketError::BasketNbMismatch.into());
     }
 
     let basket = &mut ctx.accounts.basket;
+    basket.magic = BASKET_DESC_MAGIC;
     basket.basket_name[..basket_name.len()].copy_from_slice(basket_name[..].as_bytes());
     basket.desc[..basket_desc.len()].copy_from_slice(basket_desc[..].as_bytes());
     basket.number_of_components = basket_components.len() as u8;
@@ -138,23 +137,12 @@ pub fn add_basket(
         );
         token::initialize_mint(cpi, 6, &authority, Some(&authority))?;
     }
+
     group.number_of_baskets += 1;
     Ok(())
 }
 
 pub fn update_price(ctx: Context<UpdatePrice>) -> ProgramResult {
-    let group = ctx.accounts.group.load()?;
-    let cache = &mut ctx.accounts.cache.load_mut()?;
-
-    let pos = group
-        .token_description
-        .iter()
-        .position(|x| x.price_oracle == *ctx.accounts.oracle_ai.key);
-    // check if oracle is registered in token list
-    if pos == None {
-        return Err(FruitBasketError::TokenNotFound.into());
-    }
-    let token_index = pos.unwrap();
     let oracle_data = ctx.accounts.oracle_ai.try_borrow_data()?;
     let oracle = pyth_client::cast::<Price>(&oracle_data);
     if oracle.agg.price <= 0 {
@@ -165,16 +153,34 @@ pub fn update_price(ctx: Context<UpdatePrice>) -> ProgramResult {
     if oracle.agg.conf > threshold {
         return Err(FruitBasketError::LowConfidenceInOracle.into());
     } 
-    cache.last_price[token_index] = oracle.agg.price as u64;
-    cache.last_confidence[token_index] = oracle.agg.conf;
-    cache.last_exp[token_index] = oracle.expo;
+    ctx.accounts.token_desc.cache.last_price = oracle.agg.price as u64;
+    ctx.accounts.token_desc.cache.last_confidence = oracle.agg.conf;
+    ctx.accounts.token_desc.cache.last_exp = oracle.expo;
     Ok(())
 }
 
 pub fn update_basket_price(ctx : Context<UpdateBasketPrice>) -> ProgramResult{
     let basket = &mut ctx.accounts.basket;
-    let cache = ctx.accounts.cache.load()?;
-    basket.update_price(&cache)?;
+    // deserialize remaining accounts for the basket tokens
+    let token_descs_deserailized = ctx.remaining_accounts.iter().map( |x| {
+        let account_data = &x.try_borrow_data()?;
+        let mut account_data_slice: &[u8] = &account_data;
+        TokenDescription::try_deserialize_unchecked(&mut account_data_slice)
+
+    } ).collect::<Vec<_>>();
+
+    let res_error = token_descs_deserailized.iter().any(|x| x.is_err());
+    if res_error {
+        return Err(FruitBasketError::ErrorDeserializeTokeDesc.into());
+    }
+    let token_descs = token_descs_deserailized.iter().map(|x| x.as_ref().ok().unwrap()).collect::<Vec<_>>();
+    
+    let wrong_magic = token_descs.iter().any(|x| x.magic != TOKEN_DESC_MAGIC);
+    if wrong_magic {
+        return Err(FruitBasketError::ErrorDeserializeTokeDesc.into());
+    }
+    msg!("deserialization done");
+    basket.update_price(&token_descs)?;
     Ok(())
 }
 
@@ -260,21 +266,18 @@ pub fn init_trade_context(
     trade_context.quote_token_account = ctx.accounts.quote_token_account.key();
     trade_context.basket_token_account = ctx.accounts.basket_token_account.key();
     trade_context.initial_usdc_transfer_amount = trade_context.usdc_amount_left;
-    trade_context.tokens_treated = [1; MAX_NB_TOKENS];
+    trade_context.tokens_treated = [0; MAX_NB_COMPONENTS];
 
     for component_index in 0..basket.number_of_components {
-        let component : &BasketComponentDescription = &basket.components[component_index as usize];
-        let token = &group.token_description[component.token_index as usize];
-        let position = component.token_index as usize;
-
+        let position = component_index as usize;
+        let component : &BasketComponentDescription = &basket.components[position]; 
+        trade_context.token_mints[position] = component.token_mint;
         // check if we found the token mint in our token list
         trade_context.tokens_treated[position] = 0;
 
         // calculate amount of tokens to transfer
         let amount_of_tokens = (amount as u128)
                                             .checked_mul(component.amount.into()).unwrap()
-                                            .checked_div(10u128.pow(6)).unwrap()
-                                            .checked_mul(10u128.pow(token.token_decimal.into())).unwrap()
                                             .checked_div(10u128.pow(component.decimal.into())).unwrap();
         
         trade_context.token_amounts[position] = amount_of_tokens as u64;   
@@ -287,20 +290,15 @@ pub fn init_trade_context(
 }
 
 pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> ProgramResult {
-    let basket_group = ctx.accounts.fruitbasket_group.load()?;
-    let _token_index = basket_group.token_description.iter().position(|x| x.token_mint == ctx.accounts.token_mint.key());
-    if _token_index == None {
-        return Err(FruitBasketError::TokenNotFound.into());
-    }
-    let token_index = _token_index.unwrap();
     let fruitbasket = &ctx.accounts.fruitbasket;
-    let _component_in_basket = fruitbasket.components.iter().position(|x| (x.token_index as usize) == token_index);
+    let _component_in_basket = fruitbasket.components.iter().position(|x| x.token_mint == ctx.accounts.token_mint.key());
     // check if token is component of the basket
     if _component_in_basket == None 
     {
         return Ok(());
     }
-    
+    let token_index = _component_in_basket.unwrap();
+    let token_desc = &ctx.accounts.token_desc;
     let mut trade_context = ctx.accounts.trade_context.load_mut()?;
 
     // check if token is already treated
@@ -329,7 +327,14 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
     let quote_token_transaction_pool = &ctx.accounts.quote_token_transaction_pool.to_account_info();
     let token_pool = &ctx.accounts.token_pool.to_account_info();
 
-    let token_amount = trade_context.token_amounts[token_index];
+    // recalculate amount by taking token decimals under consideration
+    let token_amount = if token_desc.token_decimal != 6 { 
+                                trade_context.token_amounts[token_index]
+                                    .checked_mul(10u64.pow(token_desc.token_decimal.into())).unwrap()
+                                    .checked_div(10u64.pow(6)).unwrap() 
+                            } else {
+                                trade_context.token_amounts[token_index]
+                            };
     let (lot_size ,max_coin_qty ) = {
         let market_state = MarketState::load(&ctx.accounts.market, ctx.accounts.dex_program.key)?;
         (market_state.coin_lot_size, token_amount.checked_div(market_state.coin_lot_size).unwrap())
@@ -371,9 +376,8 @@ pub fn process_token_for_context(ctx : Context<ProcessTokenOnContext>) -> Progra
 
 pub fn finalize_context(ctx : Context<FinalizeContext>) -> ProgramResult {
     let trade_context = ctx.accounts.trade_context.load_mut()?;
-    let basket_group = ctx.accounts.fruitbasket_group.load()?;
     // check if all tokens are treated
-    for i in 0..basket_group.token_count {
+    for i in 0..ctx.accounts.fruitbasket.number_of_components {
         if trade_context.tokens_treated[i as usize] != 1 {
             return Err(FruitBasketError::NotAllTokensTreatedBeforeFinalize.into());
         }
@@ -568,19 +572,25 @@ impl<'info> ProcessTokenOnContext<'info>{
 
 
 impl Basket {
-    pub fn update_price(&mut self, cache : &Cache) -> ProgramResult {
+    pub fn update_price(&mut self, token_descs : &Vec<&TokenDescription>) -> ProgramResult {
         let mut price  = I80F48::from_num(0);
         let mut confidence  = I80F48::from_num(0);
         let decimal : u8 = 6;
         
         for i in 0..self.number_of_components {
             let comp = self.components[i as usize];
-            let token_index : usize = comp.token_index as usize;
-            let mut comp_price = cache.last_price[token_index].checked_mul(comp.amount).unwrap().checked_div(10u64.pow(comp.decimal as u32)).unwrap();
-            let mut comp_conf = cache.last_confidence[token_index].checked_mul(comp.amount).unwrap().checked_div(10u64.pow(comp.decimal as u32)).unwrap();
+            let position = token_descs.iter().position(|x| x.token_mint == comp.token_mint);
+            if position == None {
+                return Err(FruitBasketError::TokenNotFound.into());
+            }
+            let token_index = position.unwrap();
+            let cache = token_descs[token_index].cache;
+            
+            let mut comp_price = cache.last_price.checked_mul(comp.amount).unwrap().checked_div(10u64.pow(comp.decimal as u32)).unwrap();
+            let mut comp_conf = cache.last_confidence.checked_mul(comp.amount).unwrap().checked_div(10u64.pow(comp.decimal as u32)).unwrap();
 
             //pyth decimal is negative usual decimal
-            let pyth_decimal = if cache.last_exp[token_index] >= 0 { 0 } else {-cache.last_exp[token_index] as u8};
+            let pyth_decimal = if cache.last_exp >= 0 { 0 } else {-cache.last_exp as u8};
             
             if pyth_decimal != decimal {
                 if pyth_decimal > decimal {

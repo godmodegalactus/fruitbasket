@@ -15,15 +15,13 @@ use errors::*;
 
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
-const MAX_NB_TOKENS : usize = 20;
 const MAX_NB_COMPONENTS: usize = 10;
 const FRUIT_BASKET_GROUP : &[u8] = b"fruitbasket_group";
-const FRUIT_BASKET_CACHE : &[u8] = b"fruitbasket_cache";
 const FRUIT_BASKET_AUTHORITY : &[u8] = b"fruitbasket_auth";
 const FRUIT_BASKET : &[u8] = b"fruitbasket";
 const FRUIT_BASKET_MINT : &[u8] = b"fruitbasket_mint";
 const FRUIT_BASKET_CONTEXT : &[u8] = b"fruitbasket_context";
-
+const FRUIT_BASKET_TOKEN : &[u8] = b"fruitbasket_token";
 mod empty {
     use super::*;
     declare_id!("HJt8Tjdsc9ms9i4WCZEzhzr4oyf3ANcdzXrNdLPFqm3M");
@@ -40,7 +38,7 @@ pub mod fruitbasket {
         processor::initialize_group(ctx, base_mint_name)
     }
 
-    pub fn add_token(ctx: Context<AddToken>, name: String) -> ProgramResult {
+    pub fn add_token(ctx: Context<AddToken>, _bump : u8, name: String) -> ProgramResult {
         processor::add_token(ctx, name)
     }
 
@@ -59,7 +57,7 @@ pub mod fruitbasket {
         processor::update_price(ctx)
     }
 
-    pub fn update_basket_price(ctx : Context<UpdateBasketPrice>) -> ProgramResult{
+    pub fn update_basket_price(ctx : Context<UpdateBasketPrice>,) -> ProgramResult{
         processor::update_basket_price(ctx)
     }
 

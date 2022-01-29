@@ -145,33 +145,6 @@ export class SerumUtils {
 
             await marketMaker.placeOrders(market, bids, asks);
         }
-        {
-            const marketMaker = await this.createMarketMaker(
-                1 * LAMPORTS_PER_SOL,
-                [
-                    [baseToken, baseToken.amount(nb * 10)],
-                    [quoteToken, quoteToken.amount(40000000)],
-                ]
-            );
-            const bids = MarketMaker.makeOrders([[marketPrice * 0.994, nb]]);
-            const asks = MarketMaker.makeOrders([[marketPrice * 1.006, nb]]);
-
-            await marketMaker.placeOrders(market, bids, asks);
-        }
-
-        {
-            const marketMaker = await this.createMarketMaker(
-                100 * LAMPORTS_PER_SOL,
-                [
-                    [baseToken, baseToken.amount(nb * 10)],
-                    [quoteToken, quoteToken.amount(40000000)],
-                ]
-            );
-            const bids = MarketMaker.makeOrders([[marketPrice * 0.992, nb]]);
-            const asks = MarketMaker.makeOrders([[marketPrice * 1.008, nb]]);
-
-            await marketMaker.placeOrders(market, bids, asks);
-        }
         return market;
     }
 

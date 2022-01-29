@@ -30,4 +30,6 @@ pub enum FruitBasketError {
     UnknownBasket,
     #[msg("Not all tokens were treated before calling Finalize")]
     NotAllTokensTreatedBeforeFinalize,
+    #[msg("Error fetching token description")]
+    ErrorDeserializeTokeDesc,
 }
