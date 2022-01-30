@@ -134,17 +134,12 @@ describe("fruitbasket", () => {
       [Buffer.from("fruitbasket_group"), owner.publicKey.toBuffer()],
       program.programId
     );
-    const [tmp_cache, bump_cache] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("fruitbasket_cache"), owner.publicKey.toBuffer()],
-      program.programId
-    );
-
     frt_bsk_group = tmp_group;
     mlog.log("group : " + frt_bsk_group);
     quote_token_transaction_pool = await quote_token.createAccount(
       owner.publicKey
     );
-    await program.rpc.initializeGroup(bump_grp, bump_cache, "USDC", {
+    await program.rpc.initializeGroup(bump_grp, "USDC", {
       accounts: {
         owner: owner.publicKey,
         fruitBasketGrp: frt_bsk_group,

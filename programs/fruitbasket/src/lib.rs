@@ -32,8 +32,7 @@ pub mod fruitbasket {
     use super::*;
 
     pub fn initialize_group(ctx: Context<InitializeGroup>, 
-            _bump_group: u8, 
-            _bump_cache: u8,
+            _bump_group: u8,
             base_mint_name: String) -> ProgramResult {
         processor::initialize_group(ctx, base_mint_name)
     }

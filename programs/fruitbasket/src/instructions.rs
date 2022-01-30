@@ -3,7 +3,7 @@ use crate::*;
 /// To initialize a group i.e inital data for the market
 /// This should be done only by owner of the market
 #[derive(Accounts)]
-#[instruction(bump_group: u8, bump_cache: u8)]
+#[instruction(bump_group: u8)]
 pub struct InitializeGroup<'info> {
     #[account(mut, signer)]
     pub owner : AccountInfo<'info>,
